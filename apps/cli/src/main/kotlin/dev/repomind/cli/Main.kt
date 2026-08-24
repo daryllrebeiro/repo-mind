@@ -5,6 +5,7 @@ import dev.repomind.core.classpath.ClasspathResolver
 import dev.repomind.core.classpath.FileBasedClasspathCache
 import dev.repomind.core.model.BuildSystem
 import dev.repomind.core.scanner.RepositoryScanner
+import dev.repomind.language.java.JavaSemanticParser
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import picocli.CommandLine
@@ -18,7 +19,7 @@ import kotlin.system.exitProcess
     mixinStandardHelpOptions = true,
     version = ["repomind 0.1.0"],
     description = ["Codebase intelligence engine for AI agents."],
-    subcommands = [ScanCommand::class, ClasspathCommand::class],
+    subcommands = [ScanCommand::class, ClasspathCommand::class, ParseCommand::class],
 )
 class RepomindCli : Runnable {
     override fun run() {
@@ -74,6 +75,53 @@ data class ClasspathResultDto(
     val fromCache: Boolean,
     val entryCount: Int,
     val entries: List<String>,
+)
+
+@Command(name = "parse", description = ["Semantically parse Java sources and report the extracted code model."])
+class ParseCommand : Runnable {
+    @Parameters(index = "0", description = ["Repository root directory"])
+    lateinit var root: Path
+
+    override fun run() {
+        val scan = RepositoryScanner().scan(root)
+        val resolver = ClasspathResolver(cache = FileBasedClasspathCache(scan.root.resolve(".repomind/cache/classpath")))
+        val parser = JavaSemanticParser()
+        for (module in scan.modules) {
+            val jars = try {
+                resolver.resolve(scan.root, module, scan.buildSystem).entries
+            } catch (_: Exception) {
+                emptyList()
+            }
+            val parsed = parser.parseModule(module, jars)
+            println(
+                Json.encodeToString(
+                    ModuleParseDto.serializer(),
+                    ModuleParseDto(
+                        module = parsed.moduleName,
+                        typeCount = parsed.typeCount,
+                        methodCount = parsed.types.sumOf { it.methods.size },
+                        fieldCount = parsed.fieldsCount(),
+                        unresolvedCount = parsed.unresolvedCount,
+                        unresolvedSymbols = parsed.unresolvedSymbols.take(20).map { "${it.symbol} (${it.filePath}:${it.line})" },
+                        types = parsed.types.map { it.fqn },
+                    ),
+                ),
+            )
+        }
+    }
+}
+
+private fun dev.repomind.core.model.code.ModuleParse.fieldsCount(): Int = types.sumOf { it.fields.size }
+
+@Serializable
+data class ModuleParseDto(
+    val module: String,
+    val typeCount: Int,
+    val methodCount: Int,
+    val fieldCount: Int,
+    val unresolvedCount: Int,
+    val unresolvedSymbols: List<String>,
+    val types: List<String>,
 )
 
 fun main(args: Array<String>) {

@@ -12,6 +12,7 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:scanner"))
     implementation(project(":core:classpath"))
+    implementation(project(":language:java"))
     implementation(libs.picocli)
     implementation(libs.kotlinx.serialization.json)
 }
