@@ -1,0 +1,40 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+
+# RepoMind local state (index, cache)
+.repomind/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Kotlin/Java
+*.class
+*.jar
+!gradle/wrapper/*.jar
+out/
+
+# Node (future VS Code extension)
+node_modules/
+dist/
+
+# Local env / secrets
+.env
+.env.*
+
+# Kilo workspace state
+.kilo/
