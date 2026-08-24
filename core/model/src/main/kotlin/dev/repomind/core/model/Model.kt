@@ -4,6 +4,8 @@ import java.nio.file.Path
 
 enum class BuildSystem { MAVEN, GRADLE_KOTLIN, GRADLE_GROOVY, UNKNOWN }
 
+enum class Visibility { PUBLIC, PROTECTED, PRIVATE, PACKAGE }
+
 data class SourceRoot(val path: Path, val isTest: Boolean)
 
 data class RepoModule(
