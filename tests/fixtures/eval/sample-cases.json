@@ -1,0 +1,9 @@
+[
+  {
+    "name": "order-service-uses-mail-config",
+    "description": "OrderService should depend on MailConfig via field usage",
+    "expectations": [
+      { "sourceFqn": "com.example.OrderService", "targetOwner": "com.example.MailConfig", "kind": "USES", "minConfidence": "POSSIBLE" }
+    ]
+  }
+]
