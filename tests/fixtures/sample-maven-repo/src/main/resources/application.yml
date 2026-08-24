@@ -1,0 +1,6 @@
+app:
+  mail:
+    host: smtp.example.com
+    port: 587
+server:
+  port: 8080

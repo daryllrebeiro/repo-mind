@@ -25,7 +25,7 @@ class RepositoryScannerTest {
     fun `discovers source roots and files while respecting gitignore`() {
         val result = RepositoryScanner().scan(fixture)
 
-        assertTrue(result.sourceFileCount == 2, "expected 2 source files, got ${result.sourceFileCount}")
+        assertTrue(result.sourceFileCount == 4, "expected 4 source files, got ${result.sourceFileCount}")
         val server = result.modules.first { it.name == "server" }
         assertEquals(1, server.sourceRoots.size)
         assertTrue(server.sourceRoots.single().path.fileName.toString() == "java")

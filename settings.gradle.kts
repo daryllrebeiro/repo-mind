@@ -9,6 +9,7 @@ dependencyResolutionManagement {
 include(":core:model")
 include(":core:scanner")
 include(":core:classpath")
+include(":core:config")
 include(":language:java")
 include(":storage:sqlite")
 include(":cli")
