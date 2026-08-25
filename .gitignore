@@ -38,3 +38,6 @@ dist/
 
 # Kilo workspace state
 .kilo/
+
+# Local example repos for manual testing (not part of the build)
+java-examples-for-repo-mind/
