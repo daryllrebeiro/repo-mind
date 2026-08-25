@@ -77,11 +77,16 @@ class JavaSemanticParser {
         val edges = buildEdges(types, importsByType).toMutableList()
         edges += extractCalls(typeSolver, types, cusByType, filesByType)
 
+        val confirmedPairs = edges.filter { it.confidence == Confidence.CONFIRMED }.map { Triple(it.sourceFqn, it.targetFqn, it.kind) }.toSet()
+        val deduped = edges.filterNot { e ->
+            e.confidence == Confidence.POSSIBLE && Triple(e.sourceFqn, e.targetFqn, e.kind) in confirmedPairs
+        }
+
         return ModuleParse(
             moduleName = module.name,
             types = types,
             unresolvedSymbols = unresolved.distinctBy { Triple(it.symbol, it.filePath, it.line) },
-            edges = edges,
+            edges = deduped,
         )
     }
 
@@ -105,6 +110,7 @@ class JavaSemanticParser {
 
         val calls = mutableListOf<DependencyEdge>()
         val facade = JavaParserFacade.get(typeSolver)
+        val testTypes = types.filter { it.isTest }.map { it.fqn }.toSet()
 
         for ((fqn, pair) in cusByType) {
             val (cu, typeDecl) = pair
@@ -156,7 +162,10 @@ class JavaSemanticParser {
             }
         }
 
-        return calls.distinctBy { e -> listOf(e.sourceFqn, e.targetFqn, e.kind, e.confidence) }
+        return calls.distinctBy { e -> listOf(e.sourceFqn, e.targetFqn, e.kind, e.confidence) } +
+            calls.filter { it.sourceFqn in testTypes && it.targetFqn.substringBefore('#') in projectTypes }
+                .map { DependencyEdge(it.sourceFqn, it.targetFqn.substringBefore('#'), EdgeKind.TESTS, Confidence.POSSIBLE) }
+                .distinctBy { Triple(it.sourceFqn, it.targetFqn, it.kind) }
     }
 
     private fun fieldToFqn(simpleTypeName: String?, facade: JavaParserFacade): String? {
