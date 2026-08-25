@@ -19,6 +19,7 @@ data class SymbolRow(
     val lineStart: Int,
     val lineEnd: Int,
     val visibility: String,
+    val annotations: List<String> = emptyList(),
 )
 
 class SymbolDatabase private constructor(private val connection: Connection) : AutoCloseable {
@@ -39,7 +40,8 @@ class SymbolDatabase private constructor(private val connection: Connection) : A
                     file_path TEXT,
                     line_start INTEGER NOT NULL DEFAULT 0,
                     line_end INTEGER NOT NULL DEFAULT 0,
-                    visibility TEXT NOT NULL DEFAULT 'PACKAGE'
+                    visibility TEXT NOT NULL DEFAULT 'PACKAGE',
+                    annotations TEXT NOT NULL DEFAULT ''
                 )
                 """.trimIndent(),
             )
@@ -48,7 +50,63 @@ class SymbolDatabase private constructor(private val connection: Connection) : A
             stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_symbols_module ON symbols(module)")
         }
         edges.init()
+        connection.createStatement().use { stmt ->
+            stmt.executeUpdate(
+                """
+                CREATE TABLE IF NOT EXISTS file_state (
+                    module TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    hash TEXT NOT NULL,
+                    PRIMARY KEY (module, path)
+                )
+                """.trimIndent(),
+            )
+        }
     }
+
+    fun fileStates(moduleName: String): Map<String, String> =
+        connection.prepareStatement("SELECT path, hash FROM file_state WHERE module = ?").use { ps ->
+            ps.setString(1, moduleName)
+            ps.executeQuery().use { rs ->
+                buildMap {
+                    while (rs.next()) put(rs.getString("path"), rs.getString("hash"))
+                }
+            }
+        }
+
+    fun setFileStates(moduleName: String, states: Map<String, String>) {
+        connection.autoCommit = false
+        try {
+            connection.prepareStatement("DELETE FROM file_state WHERE module = ?").use { del ->
+                del.setString(1, moduleName)
+                del.executeUpdate()
+            }
+            connection.prepareStatement("INSERT INTO file_state (module, path, hash) VALUES (?, ?, ?)").use { ins ->
+                for ((path, hash) in states) {
+                    ins.setString(1, moduleName)
+                    ins.setString(2, path)
+                    ins.setString(3, hash)
+                    ins.addBatch()
+                }
+                ins.executeBatch()
+            }
+            connection.commit()
+        } catch (e: Exception) {
+            connection.rollback()
+            throw e
+        } finally {
+            connection.autoCommit = true
+        }
+    }
+
+    fun allModulesWithFiles(): List<String> =
+        connection.createStatement().use { stmt ->
+            stmt.executeQuery("SELECT DISTINCT module FROM file_state").use { rs ->
+                buildList {
+                    while (rs.next()) add(rs.getString("module"))
+                }
+            }
+        }
 
     fun replaceModule(moduleName: String, parse: ModuleParse): Int {
         var inserted = 0
@@ -59,19 +117,19 @@ class SymbolDatabase private constructor(private val connection: Connection) : A
                 del.executeUpdate()
             }
             val sql = """
-                INSERT INTO symbols (module, kind, name, qualified_name, parent_fqn, file_path, line_start, line_end, visibility)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO symbols (module, kind, name, qualified_name, parent_fqn, file_path, line_start, line_end, visibility, annotations)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent()
             connection.prepareStatement(sql).use { insert ->
                 for (type in parse.types) {
-                    bindAndAdd(insert, moduleName, type.kind.name, type.fqn.substringAfterLast('.'), type.fqn, null, type.filePath, type.lineStart, type.lineEnd, "PUBLIC")
+                    bindAndAdd(insert, moduleName, type.kind.name, type.fqn.substringAfterLast('.'), type.fqn, null, type.filePath, type.lineStart, type.lineEnd, typeVisibility(type), type.annotations.joinToString(","))
                     inserted++
                     for (method in type.methods) {
-                        bindAndAdd(insert, moduleName, "METHOD", method.name, "${type.fqn}#${method.signature}", type.fqn, type.filePath, method.line, method.line, method.visibility.name)
+                        bindAndAdd(insert, moduleName, "METHOD", method.name, "${type.fqn}#${method.signature}", type.fqn, type.filePath, method.line, method.line, method.visibility.name, "")
                         inserted++
                     }
                     for (field in type.fields) {
-                        bindAndAdd(insert, moduleName, "FIELD", field.name, "${type.fqn}.${field.name}", type.fqn, type.filePath, field.line, field.line, field.visibility.name)
+                        bindAndAdd(insert, moduleName, "FIELD", field.name, "${type.fqn}.${field.name}", type.fqn, type.filePath, field.line, field.line, field.visibility.name, "")
                         inserted++
                     }
                 }
@@ -87,6 +145,10 @@ class SymbolDatabase private constructor(private val connection: Connection) : A
         return inserted
     }
 
+    private fun typeVisibility(type: ParsedType): String =
+        type.methods.filter { !it.synthetic }.map { it.visibility.name }.distinct().singleOrNull()
+            ?: if (type.kind == dev.repomind.core.model.code.TypeKind.INTERFACE) "PUBLIC" else "PACKAGE"
+
     private fun bindAndAdd(
         insert: java.sql.PreparedStatement,
         module: String,
@@ -98,6 +160,7 @@ class SymbolDatabase private constructor(private val connection: Connection) : A
         lineStart: Int,
         lineEnd: Int,
         visibility: String,
+        annotations: String,
     ) {
         insert.setString(1, module)
         insert.setString(2, kind)
@@ -108,6 +171,7 @@ class SymbolDatabase private constructor(private val connection: Connection) : A
         insert.setInt(7, lineStart)
         insert.setInt(8, lineEnd)
         insert.setString(9, visibility)
+        insert.setString(10, annotations)
         insert.addBatch()
     }
 
@@ -117,8 +181,20 @@ class SymbolDatabase private constructor(private val connection: Connection) : A
     fun findByNamePrefix(prefix: String, limit: Int = 100): List<SymbolRow> =
         query("SELECT $COLUMNS FROM symbols WHERE name LIKE ? ORDER BY qualified_name LIMIT ?", "$prefix%", limit)
 
+    fun countByNamePrefix(prefix: String): Long =
+        connection.prepareStatement("SELECT COUNT(*) FROM symbols WHERE name LIKE ?").use { ps ->
+            ps.setString(1, "$prefix%")
+            ps.executeQuery().use { rs ->
+                rs.next()
+                rs.getLong(1)
+            }
+        }
+
     fun findByModule(moduleName: String): List<SymbolRow> =
         query("SELECT $COLUMNS FROM symbols WHERE module = ? ORDER BY qualified_name", moduleName)
+
+    fun allTypes(): List<SymbolRow> =
+        query("SELECT $COLUMNS FROM symbols WHERE kind NOT IN ('METHOD', 'FIELD') ORDER BY qualified_name")
 
     fun count(): Long =
         connection.createStatement().use { stmt ->
@@ -128,7 +204,7 @@ class SymbolDatabase private constructor(private val connection: Connection) : A
             }
         }
 
-    private val COLUMNS = "id, module, kind, name, qualified_name, parent_fqn, file_path, line_start, line_end, visibility"
+    private val COLUMNS = "id, module, kind, name, qualified_name, parent_fqn, file_path, line_start, line_end, visibility, annotations"
 
     private fun query(sql: String, vararg args: Any): List<SymbolRow> =
         connection.prepareStatement(sql).use { ps ->
@@ -148,6 +224,7 @@ class SymbolDatabase private constructor(private val connection: Connection) : A
                                 lineStart = rs.getInt("line_start"),
                                 lineEnd = rs.getInt("line_end"),
                                 visibility = rs.getString("visibility"),
+                                annotations = rs.getString("annotations").split(',').filter { it.isNotBlank() },
                             ),
                         )
                     }
