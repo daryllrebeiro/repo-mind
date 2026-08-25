@@ -8,6 +8,18 @@ import dev.repomind.core.eval.CaseLoader
 import dev.repomind.core.eval.EvalHarness
 import dev.repomind.core.eval.EvalReport
 import dev.repomind.core.graph.InMemoryGraph
+import dev.repomind.core.impact.ImpactAnalyzer
+import dev.repomind.core.impact.ImpactReport
+import dev.repomind.core.impact.SymbolMeta
+import dev.repomind.core.index.IncrementalIndexer
+import dev.repomind.core.index.IncrementalResult
+import dev.repomind.core.model.code.Confidence
+import dev.repomind.core.model.code.DependencyEdge
+import dev.repomind.core.model.code.EdgeKind
+import dev.repomind.core.rules.RuleEvaluator
+import dev.repomind.core.rules.RuleLoader
+import dev.repomind.core.rules.RulesReport
+import dev.repomind.core.rules.TypeStereotypeInfo
 import dev.repomind.core.model.BuildSystem
 import dev.repomind.core.scanner.RepositoryScanner
 import dev.repomind.language.java.JavaSemanticParser
@@ -25,7 +37,7 @@ import kotlin.system.exitProcess
     mixinStandardHelpOptions = true,
     version = ["repomind 0.1.0"],
     description = ["Codebase intelligence engine for AI agents."],
-    subcommands = [ScanCommand::class, ClasspathCommand::class, ParseCommand::class, ConfigCommand::class, IndexCommand::class, EvalCommand::class, CallersCommand::class],
+    subcommands = [ScanCommand::class, ClasspathCommand::class, ParseCommand::class, ConfigCommand::class, IndexCommand::class, EvalCommand::class, CallersCommand::class, ImpactCommand::class, UpdateCommand::class, RulesCommand::class],
 )
 class RepomindCli : Runnable {
     override fun run() {
@@ -298,6 +310,76 @@ data class CallersResultDto(
     val callers: List<String>,
     val elapsedMs: Long,
 )
+
+@Command(
+    name = "impact",
+    description = ["Deterministic impact analysis with evidence-traceable scoring (run 'repomind index' first)."],
+)
+class ImpactCommand : Runnable {
+    @Parameters(index = "0", description = ["Repository root directory"])
+    lateinit var root: Path
+
+    @Parameters(index = "1", description = ["Fully-qualified symbol name"])
+    lateinit var symbol: String
+
+    override fun run() {
+        val dbPath = root.toAbsolutePath().normalize().resolve(".repomind/index.db")
+        if (!java.nio.file.Files.isRegularFile(dbPath)) {
+            System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
+            kotlin.system.exitProcess(1)
+        }
+        dev.repomind.core.query.RepoQueryEngine(dbPath).use { engine ->
+            val report = engine.impact(symbol)
+            println(Json.encodeToString(ImpactReport.serializer(), report))
+        }
+    }
+}
+
+@Command(
+    name = "update",
+    description = ["Incrementally re-index only changed files (falls back to full index on first run)."],
+)
+class UpdateCommand : Runnable {
+    @Parameters(index = "0", description = ["Repository root directory"])
+    lateinit var root: Path
+
+    override fun run() {
+        val result = IncrementalIndexer(root.toAbsolutePath().normalize().resolve(".repomind/index.db")).update(root)
+        println(Json.encodeToString(IncrementalResult.serializer(), result))
+    }
+}
+
+@Command(
+    name = "rules",
+    description = ["Evaluate architecture rules (.repomind/rules.yaml or explicit file) against the indexed graph."],
+)
+class RulesCommand : Runnable {
+    @Parameters(index = "0", description = ["Repository root directory"])
+    lateinit var root: Path
+
+    @Parameters(index = "1", description = ["Optional rules YAML path"], arity = "0..1")
+    var rulesFile: Path? = null
+
+    override fun run() {
+        val dbPath = root.toAbsolutePath().normalize().resolve(".repomind/index.db")
+        if (!java.nio.file.Files.isRegularFile(dbPath)) {
+            System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
+            kotlin.system.exitProcess(1)
+        }
+        val rulesPath = rulesFile ?: dbPath.resolveSibling("rules.yaml")
+        val rules = RuleLoader.load(rulesPath)
+        SymbolDatabase.open(dbPath).use { db ->
+            val report = RuleEvaluator().evaluate(
+                rules,
+                db.allTypes().map { TypeStereotypeInfo(it.qualifiedName, it.annotations) },
+                db.edges.findAll().map { row ->
+                    DependencyEdge(row.sourceFqn, row.targetFqn, EdgeKind.valueOf(row.kind), Confidence.valueOf(row.confidence))
+                },
+            )
+            println(Json.encodeToString(RulesReport.serializer(), report))
+        }
+    }
+}
 
 fun main(args: Array<String>) {
     exitProcess(CommandLine(RepomindCli()).execute(*args))
