@@ -67,12 +67,15 @@ object MermaidEmitter {
         return buildString {
             appendLine("```mermaid")
             appendLine("graph LR")
-            path.forEachIndexed { index, participant ->
-                val cls = if (index >= dashedFromIndex) ":::dashed" else ""
+            for (participant in path.distinct()) {
+                val cls = if (path.indexOf(participant) >= dashedFromIndex) ":::dashed" else ""
                 appendLine("    ${ids.of(participant)}[\"${sanitize(participant.substringAfterLast('.'))}\"]$cls")
             }
-            for (i in 0 until path.size - 1) {
-                appendLine("    ${ids.of(path[i])} --> ${ids.of(path[i + 1])}")
+            var previous = path.firstOrNull()
+            for ((index, participant) in path.withIndex()) {
+                if (index == 0 || participant == previous) continue
+                appendLine("    ${ids.of(previous!!)} --> ${ids.of(participant)}")
+                previous = participant
             }
             if (path.indices.any { it >= dashedFromIndex }) {
                 appendLine("    classDef dashed stroke-dasharray: 5 5;")
