@@ -16,6 +16,8 @@ import dev.repomind.core.index.IncrementalResult
 import dev.repomind.core.model.code.Confidence
 import dev.repomind.core.model.code.DependencyEdge
 import dev.repomind.core.model.code.EdgeKind
+import dev.repomind.core.query.RepoQueryEngine
+import dev.repomind.core.report.ReportGenerator
 import dev.repomind.core.rules.RuleEvaluator
 import dev.repomind.core.rules.RuleLoader
 import dev.repomind.core.rules.RulesReport
@@ -37,7 +39,7 @@ import kotlin.system.exitProcess
     mixinStandardHelpOptions = true,
     version = ["repomind 0.1.0"],
     description = ["Codebase intelligence engine for AI agents."],
-    subcommands = [ScanCommand::class, ClasspathCommand::class, ParseCommand::class, ConfigCommand::class, IndexCommand::class, EvalCommand::class, CallersCommand::class, ImpactCommand::class, UpdateCommand::class, RulesCommand::class],
+    subcommands = [ScanCommand::class, ClasspathCommand::class, ParseCommand::class, ConfigCommand::class, IndexCommand::class, EvalCommand::class, CallersCommand::class, ImpactCommand::class, UpdateCommand::class, RulesCommand::class, ReportCommand::class],
 )
 class RepomindCli : Runnable {
     override fun run() {
@@ -380,6 +382,40 @@ class RulesCommand : Runnable {
         }
     }
 }
+
+@Command(
+    name = "report",
+    description = ["Generate a deterministic markdown analysis report (diagrams, flows, hotspots, findings) from the index."],
+)
+class ReportCommand : Runnable {
+    @Parameters(index = "0", description = ["Repository root directory"])
+    lateinit var root: Path
+
+    @picocli.CommandLine.Option(names = ["-o", "--output"], description = ["Output markdown path (default <repo>/.repomind/report.md)"])
+    var output: Path? = null
+
+    override fun run() {
+        val normalizedRoot = root.toAbsolutePath().normalize()
+        val dbPath = normalizedRoot.resolve(".repomind/index.db")
+        if (!java.nio.file.Files.isRegularFile(dbPath)) {
+            System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
+            kotlin.system.exitProcess(1)
+        }
+        val markdown = ReportGenerator(dbPath, repoName = normalizedRoot.fileName.toString()).generate()
+        val outPath = output ?: normalizedRoot.resolve(".repomind/report.md")
+        java.nio.file.Files.createDirectories(outPath.toAbsolutePath().parent)
+        java.nio.file.Files.writeString(outPath, markdown)
+        println(
+            Json.encodeToString(
+                ReportResultDto.serializer(),
+                ReportResultDto(path = outPath.toString(), bytes = markdown.length),
+            ),
+        )
+    }
+}
+
+@Serializable
+data class ReportResultDto(val path: String, val bytes: Int)
 
 fun main(args: Array<String>) {
     exitProcess(CommandLine(RepomindCli()).execute(*args))

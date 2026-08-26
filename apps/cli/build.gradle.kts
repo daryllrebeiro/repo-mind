@@ -20,6 +20,7 @@ dependencies {
     implementation(project(":core:index"))
     implementation(project(":core:query"))
     implementation(project(":core:rules"))
+    implementation(project(":core:report"))
     implementation(project(":storage:sqlite"))
     implementation(project(":language:java"))
     implementation(libs.picocli)
