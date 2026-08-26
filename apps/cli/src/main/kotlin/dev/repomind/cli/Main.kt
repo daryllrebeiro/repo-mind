@@ -1,4 +1,4 @@
-package dev.repomind.cli
+﻿package dev.repomind.cli
 
 import dev.repomind.core.classpath.ClasspathResolutionException
 import dev.repomind.core.classpath.ClasspathResolver
@@ -63,9 +63,19 @@ class ClasspathCommand : Runnable {
     @Parameters(index = "0", description = ["Repository root directory"])
     lateinit var root: Path
 
+    @picocli.CommandLine.Option(
+        names = ["--online"],
+        description = ["Allow the build tool to download dependencies (default: offline mode; no network access)."],
+    )
+    var online: Boolean = false
+
     override fun run() {
-        val scan = RepositoryScanner().scan(root)
-        val resolver = ClasspathResolver(cache = FileBasedClasspathCache(scan.root.resolve(".repomind/cache/classpath")))
+        val scanRoot = dev.repomind.core.model.PathGuard.requireDirectory(root)
+        val scan = RepositoryScanner().scan(scanRoot)
+        val resolver = ClasspathResolver(
+            cache = FileBasedClasspathCache(scan.root.resolve(".repomind/cache/classpath")),
+            allowNetwork = online,
+        )
         for (module in scan.modules) {
             try {
                 val cp = resolver.resolve(scan.root, module, scan.buildSystem)
@@ -103,7 +113,7 @@ class ParseCommand : Runnable {
     lateinit var root: Path
 
     override fun run() {
-        val scan = RepositoryScanner().scan(root)
+        val scan = RepositoryScanner().scan(dev.repomind.core.model.PathGuard.requireDirectory(root))
         val resolver = ClasspathResolver(cache = FileBasedClasspathCache(scan.root.resolve(".repomind/cache/classpath")))
         val parser = JavaSemanticParser()
         for (module in scan.modules) {
@@ -150,7 +160,7 @@ class ConfigCommand : Runnable {
     lateinit var root: Path
 
     override fun run() {
-        val scan = RepositoryScanner().scan(root)
+        val scan = RepositoryScanner().scan(dev.repomind.core.model.PathGuard.requireDirectory(root))
         val parser = JavaSemanticParser()
         val extractor = ConfigurationExtractor()
         for (module in scan.modules) {
@@ -201,7 +211,7 @@ class IndexCommand : Runnable {
 
     override fun run() {
         val startedAt = System.nanoTime()
-        val scan = RepositoryScanner().scan(root)
+        val scan = RepositoryScanner().scan(dev.repomind.core.model.PathGuard.requireDirectory(root))
         val parser = JavaSemanticParser()
         SymbolDatabase.open(scan.root.resolve(".repomind/index.db")).use { db ->
             var symbolCount = 0
@@ -251,7 +261,7 @@ class EvalCommand : Runnable {
     lateinit var casesFile: Path
 
     override fun run() {
-        val scan = RepositoryScanner().scan(root)
+        val scan = RepositoryScanner().scan(dev.repomind.core.model.PathGuard.requireDirectory(root))
         val parser = JavaSemanticParser()
         val harness = EvalHarness()
         val cases = CaseLoader.load(casesFile)
@@ -278,7 +288,7 @@ class CallersCommand : Runnable {
     override fun run() {
         val dbPath = root.toAbsolutePath().normalize().resolve(".repomind/index.db")
         if (!java.nio.file.Files.isRegularFile(dbPath)) {
-            System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
+            System.err.println("ERROR: no index at $dbPath â€” run 'repomind index <repo>' first")
             kotlin.system.exitProcess(1)
         }
         val startedAt = System.nanoTime()
@@ -327,7 +337,7 @@ class ImpactCommand : Runnable {
     override fun run() {
         val dbPath = root.toAbsolutePath().normalize().resolve(".repomind/index.db")
         if (!java.nio.file.Files.isRegularFile(dbPath)) {
-            System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
+            System.err.println("ERROR: no index at $dbPath â€” run 'repomind index <repo>' first")
             kotlin.system.exitProcess(1)
         }
         dev.repomind.core.query.RepoQueryEngine(dbPath).use { engine ->
@@ -365,7 +375,7 @@ class RulesCommand : Runnable {
     override fun run() {
         val dbPath = root.toAbsolutePath().normalize().resolve(".repomind/index.db")
         if (!java.nio.file.Files.isRegularFile(dbPath)) {
-            System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
+            System.err.println("ERROR: no index at $dbPath â€” run 'repomind index <repo>' first")
             kotlin.system.exitProcess(1)
         }
         val rulesPath = rulesFile ?: dbPath.resolveSibling("rules.yaml")
@@ -398,7 +408,7 @@ class ReportCommand : Runnable {
         val normalizedRoot = root.toAbsolutePath().normalize()
         val dbPath = normalizedRoot.resolve(".repomind/index.db")
         if (!java.nio.file.Files.isRegularFile(dbPath)) {
-            System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
+            System.err.println("ERROR: no index at $dbPath â€” run 'repomind index <repo>' first")
             kotlin.system.exitProcess(1)
         }
         val markdown = ReportGenerator(dbPath, repoName = normalizedRoot.fileName.toString()).generate()
@@ -420,3 +430,4 @@ data class ReportResultDto(val path: String, val bytes: Int)
 fun main(args: Array<String>) {
     exitProcess(CommandLine(RepomindCli()).execute(*args))
 }
+

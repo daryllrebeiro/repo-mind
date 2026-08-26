@@ -11,13 +11,14 @@ class ClasspathResolver(
     private val commandRunner: CommandRunner = ProcessCommandRunner,
     private val mavenBinary: String = "mvn",
     private val gradleBinary: String = "gradle",
+    private val allowNetwork: Boolean = false,
 ) {
 
     fun resolve(repoRoot: Path, module: RepoModule, buildSystem: BuildSystem): ResolvedClasspath {
         val buildFile = requireNotNull(module.buildFile) {
             "Module ${module.name} has no build file; cannot resolve classpath"
         }
-        val key = sha256(module.path.toAbsolutePath().normalize().toString())
+        val key = sha256(module.path.toAbsolutePath().normalize().toString() + ":network=$allowNetwork")
         val buildFileHash = sha256(Files.readAllBytes(buildFile))
 
         cache.load(key)?.let { cached ->
@@ -58,7 +59,7 @@ class ClasspathResolver(
                     "-f", pomFile.toAbsolutePath().toString(),
                     "dependency:build-classpath",
                     "-Dmdep.outputFile=${outputFile.toAbsolutePath()}",
-                ),
+                ) + if (allowNetwork) emptyList() else listOf("--offline"),
             )
             if (result.exitCode != 0) {
                 throw ClasspathResolutionException(
@@ -112,7 +113,7 @@ class ClasspathResolver(
                     "-I", initScript.toAbsolutePath().toString(),
                     "-p", repoRoot.toAbsolutePath().toString(),
                     ":${module.name}:repomindPrintClasspath",
-                ),
+                ) + if (allowNetwork) emptyList() else listOf("--offline"),
             )
             if (result.exitCode != 0) {
                 throw ClasspathResolutionException(

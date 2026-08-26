@@ -11,8 +11,9 @@ fun interface CommandRunner {
 object ProcessCommandRunner : CommandRunner {
 
     override fun run(workDir: Path, command: List<String>): CommandResult {
+        command.forEach(SafeArgs::validate)
         val effective = if (System.getProperty("os.name").lowercase().contains("windows")) {
-            listOf("cmd", "/c") + command
+            listOf("cmd", "/c") + command.map { SafeArgs.escapeForWindowsCmd(it) }
         } else {
             command
         }
