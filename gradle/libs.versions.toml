@@ -7,7 +7,7 @@ javaparser = "3.28.2"
 snakeyaml = "2.6"
 sqliteJdbc = "3.53.2.1"
 slf4j = "2.0.9"
-logback = "1.4.11"
+logback = "1.6.3"
 detekt = "1.23.4"
 # ktlintPlugin: the Gradle plugin artifact version (org.jlleitschuh.gradle.ktlint)
 ktlintPlugin = "14.2.0"
