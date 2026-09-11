@@ -2,6 +2,7 @@ package dev.repomind.core.rules
 
 import kotlinx.serialization.Serializable
 
+@Serializable
 data class Stereotype(
     val annotations: List<String> = emptyList(),
     val namePattern: String? = null,
@@ -9,6 +10,7 @@ data class Stereotype(
     fun isEmpty(): Boolean = annotations.isEmpty() && namePattern == null
 }
 
+@Serializable
 data class RuleDef(
     val name: String,
     val description: String? = null,

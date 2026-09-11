@@ -444,6 +444,18 @@ class RulesCommand : Runnable {
     var presetName: String? = null
 
     @picocli.CommandLine.Option(
+        names = ["--suggest-adr"],
+        description = ["Mine codebase dependency conventions and draft Architecture Decision Records (ADRs)"],
+    )
+    var suggestAdr: Boolean = false
+
+    @picocli.CommandLine.Option(
+        names = ["--adr-dir"],
+        description = ["Target directory to save drafted ADR markdown files (e.g. docs/adr)"],
+    )
+    var adrDir: Path? = null
+
+    @picocli.CommandLine.Option(
         names = ["--fail-on-violation"],
         description = ["Exit with status code 1 if architecture violations are found"],
     )
@@ -455,15 +467,31 @@ class RulesCommand : Runnable {
             System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
             kotlin.system.exitProcess(1)
         }
-        val rulesPath = rulesFile ?: dbPath.resolveSibling("rules.yaml")
-        val fileRules = RuleLoader.load(rulesPath)
-        val presetRules = presetName?.let { id ->
-            val p = dev.repomind.core.rules.ArchitecturePreset.fromId(id)
-            if (p != null) dev.repomind.core.rules.ArchitecturePreset.generateRules(p) else null
-        }
-        val rules = presetRules ?: fileRules
 
         SymbolDatabase.open(dbPath).use { db ->
+            if (suggestAdr) {
+                val types = db.allTypes().map { TypeStereotypeInfo(it.qualifiedName, it.annotations) }
+                val edges = db.edges.findAll().map { row ->
+                    DependencyEdge(row.sourceFqn, row.targetFqn, EdgeKind.valueOf(row.kind), Confidence.valueOf(row.confidence))
+                }
+                val adrs = dev.repomind.core.rules.AdrGenerator.generateAdrs(types, edges)
+                if (adrDir != null) {
+                    val targetDir = if (adrDir!!.isAbsolute) adrDir!! else root.resolve(adrDir!!)
+                    val written = dev.repomind.core.rules.AdrGenerator.writeAdrs(adrs, targetDir)
+                    System.err.println("Generated ${written.size} ADR(s) in $targetDir")
+                }
+                println(Json.encodeToString(kotlinx.serialization.builtins.ListSerializer(dev.repomind.core.rules.AdrDocument.serializer()), adrs))
+                return
+            }
+
+            val rulesPath = rulesFile ?: dbPath.resolveSibling("rules.yaml")
+            val fileRules = RuleLoader.load(rulesPath)
+            val presetRules = presetName?.let { id ->
+                val p = dev.repomind.core.rules.ArchitecturePreset.fromId(id)
+                if (p != null) dev.repomind.core.rules.ArchitecturePreset.generateRules(p) else null
+            }
+            val rules = presetRules ?: fileRules
+
             val report = RuleEvaluator().evaluate(
                 rules = rules,
                 types = db.allTypes().map { TypeStereotypeInfo(it.qualifiedName, it.annotations) },
@@ -576,6 +604,12 @@ class InitCommand : Runnable {
     )
     var presetName: String = "three-tier"
 
+    @picocli.CommandLine.Option(
+        names = ["--suggest-adr"],
+        description = ["Mine repository architecture and generate drafted ADRs in docs/adr/"],
+    )
+    var suggestAdr: Boolean = false
+
     override fun run() {
         val normalizedRoot = root.toAbsolutePath().normalize()
         val repomindDir = normalizedRoot.resolve(".repomind")
@@ -598,6 +632,19 @@ class InitCommand : Runnable {
             println("Initialized ${rulesFile} with preset '${preset.id}'")
         } else {
             System.err.println("NOTE: ${rulesFile} already exists; leaving unchanged.")
+        }
+
+        if (suggestAdr && java.nio.file.Files.isRegularFile(dbPath)) {
+            SymbolDatabase.open(dbPath).use { db ->
+                val types = db.allTypes().map { TypeStereotypeInfo(it.qualifiedName, it.annotations) }
+                val edges = db.edges.findAll().map { row ->
+                    DependencyEdge(row.sourceFqn, row.targetFqn, EdgeKind.valueOf(row.kind), Confidence.valueOf(row.confidence))
+                }
+                val adrs = dev.repomind.core.rules.AdrGenerator.generateAdrs(types, edges, basePkg)
+                val adrDir = normalizedRoot.resolve("docs/adr")
+                val written = dev.repomind.core.rules.AdrGenerator.writeAdrs(adrs, adrDir)
+                println("Generated ${written.size} ADR(s) in $adrDir")
+            }
         }
     }
 }

@@ -82,4 +82,46 @@ class CliCommandsTest {
         val exitCode = cmd.execute("watch", root.toString(), "--timeout-ms=500", "--debounce-ms=100", "--quiet")
         assertEquals(0, exitCode)
     }
+
+    @Test
+    fun `rules command with suggest-adr mines architecture and writes markdown ADRs`() {
+        val root = createSampleProject()
+        val webDir = root.resolve("src/main/java/com/sample/web")
+        Files.createDirectories(webDir)
+        webDir.resolve("SampleController.java").writeText(
+            """
+            package com.sample.web;
+            import com.sample.service.SampleService;
+            public class SampleController {
+                private SampleService service;
+                public String handle() { return service.run(); }
+            }
+            """.trimIndent(),
+        )
+        val repoDir = root.resolve("src/main/java/com/sample/repo")
+        Files.createDirectories(repoDir)
+        repoDir.resolve("SampleRepository.java").writeText(
+            """
+            package com.sample.repo;
+            public class SampleRepository {
+                public String query() { return "data"; }
+            }
+            """.trimIndent(),
+        )
+
+        IncrementalIndexer(root.resolve(".repomind/index.db")).update(root)
+
+        val cmd = CommandLine(RepomindCli())
+        val exitCode = cmd.execute("rules", root.toString(), "--suggest-adr", "--adr-dir=docs/adr")
+        assertEquals(0, exitCode)
+
+        val adrDir = root.resolve("docs/adr")
+        assertTrue(Files.isDirectory(adrDir))
+        val files = Files.list(adrDir).toList()
+        assertTrue(files.isNotEmpty())
+        val firstContent = Files.readString(files[0])
+        assertTrue(firstContent.contains("# ADR-"))
+        assertTrue(firstContent.contains("## Context"))
+        assertTrue(firstContent.contains("## RepoMind Architecture Rule"))
+    }
 }
