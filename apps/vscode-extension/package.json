@@ -1,0 +1,71 @@
+{
+  "name": "repomind-vscode",
+  "displayName": "RepoMind",
+  "description": "Deterministic codebase intelligence, impact analysis, and architecture governance for VS Code",
+  "version": "0.1.0",
+  "publisher": "repomind",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "workspaceContains:pom.xml",
+    "workspaceContains:build.gradle",
+    "workspaceContains:build.gradle.kts"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "repomind.indexWorkspace",
+        "title": "RepoMind: Index Workspace"
+      },
+      {
+        "command": "repomind.showImpact",
+        "title": "RepoMind: Analyze Impact of Current Symbol"
+      },
+      {
+        "command": "repomind.checkArchitectureRules",
+        "title": "RepoMind: Check Architecture Rules"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "repomind.showImpact",
+          "group": "repomind@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "RepoMind",
+      "properties": {
+        "repomind.cliPath": {
+          "type": "string",
+          "default": "repomind",
+          "description": "Path to the RepoMind CLI binary"
+        },
+        "repomind.autoCheckRulesOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically evaluate architecture rules on file save"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}

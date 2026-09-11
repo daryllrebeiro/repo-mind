@@ -12,6 +12,7 @@ data class EdgeRow(
     val targetFqn: String,
     val kind: String,
     val confidence: String,
+    val line: Int = 0,
 )
 
 class EdgeRepository(private val connection: Connection) {
@@ -174,7 +175,7 @@ class EdgeRepository(private val connection: Connection) {
             }
         }
 
-    private val COLUMNS = "id, module, source_fqn, target_fqn, kind, confidence"
+    private val COLUMNS = "id, module, source_fqn, target_fqn, kind, confidence, line"
 
     private fun query(sql: String, vararg args: Any): List<EdgeRow> =
         connection.prepareStatement(sql).use { ps ->
@@ -190,6 +191,7 @@ class EdgeRepository(private val connection: Connection) {
                                 targetFqn = rs.getString("target_fqn"),
                                 kind = rs.getString("kind"),
                                 confidence = rs.getString("confidence"),
+                                line = rs.getInt("line"),
                             ),
                         )
                     }

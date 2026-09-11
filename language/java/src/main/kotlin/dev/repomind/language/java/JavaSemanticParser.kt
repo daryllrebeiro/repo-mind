@@ -295,6 +295,27 @@ class JavaSemanticParser {
                     }
                 }
             }
+
+            // MapStruct / DTO semantic mapper awareness
+            val isMapper = typeDecl.annotations.any { it.nameAsString.substringAfterLast('.') == "Mapper" }
+            if (isMapper) {
+                for (method in typeDecl.methods) {
+                    val line = method.range.map { it.begin.line }.orElse(0)
+                    val callerMember = method.nameAsString
+                    for (param in method.parameters) {
+                        val paramSimple = param.typeAsString.substringBefore('<').substringAfterLast('.')
+                        val targetType = projectTypes.firstOrNull { it.substringAfterLast('.') == paramSimple }
+                        if (targetType != null && targetType != fqn) {
+                            calls += DependencyEdge(fqn, targetType, EdgeKind.USES, Confidence.CONFIRMED, line, callerMember)
+                        }
+                    }
+                    val returnSimple = method.typeAsString.substringBefore('<').substringAfterLast('.')
+                    val targetType = projectTypes.firstOrNull { it.substringAfterLast('.') == returnSimple }
+                    if (targetType != null && targetType != fqn) {
+                        calls += DependencyEdge(fqn, targetType, EdgeKind.USES, Confidence.CONFIRMED, line, callerMember)
+                    }
+                }
+            }
         }
 
         val allEdges = calls.distinctBy { e -> listOf(e.sourceFqn, e.targetFqn, e.kind, e.confidence) } +

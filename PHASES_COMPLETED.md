@@ -14,8 +14,8 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
 | **Phase 3** | Call Graph & Test Mapping | ✅ Complete | Method-level call edges, Spring @Qualifier dispatch, reflection detection, @MockBean exclusion, JUnit test mapping |
 | **Phase 4** | Impact Analysis Engine & Architecture Rules | ✅ Complete | Transitive blast radius, confidence scoring, git diff impact, architecture rules engine with line numbers and failOnViolation |
 | **Phase 5** | Incremental Indexing & Eval Harness | ✅ Complete | Cross-module invalidation, deleted module/file purge, sub-second indexing, quality gate (precision >= 0.85, recall >= 0.90) |
-| **Phase 6** | MCP Server, VS Code Extension & AI Agent Integration | 🔄 In Progress | MCP tools (compact JSON, streaming/caps), VS Code commands, MapStruct |
-| **Phase 7** | Production Readiness (CI/CD, Performance, Security, Observability) | ⏳ Pending | GitHub Actions, JMH benchmarks, OWASP dependency checks, JaCoCo, user docs |
+| **Phase 6** | MCP Server, VS Code Extension & AI Agent Integration | ✅ Complete | Full MCP toolset (callers, callees, rules, dependency graph, impact), compact JSON, VS Code extension scaffolded, MapStruct support |
+| **Phase 7** | Production Readiness (CI/CD, Performance, Security, Observability) | 🔄 In Progress | GitHub Actions, JMH benchmarks, OWASP dependency checks, JaCoCo, user docs |
 | **Phase 8** | Multi-Language & Extensibility | ⏳ Pending | Language parser plugin SPI, Kotlin support, project configuration |
 
 ---
@@ -78,3 +78,17 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
   - Sub-second performance benchmark verified on 120-file scale fixture.
   - `EvalModel.kt`: Added `passedGate` check (`macroPrecision >= 0.85 && macroRecall >= 0.90`) and structured case metrics.
   - `BenchmarkEvalTest.kt`: Realistic Spring benchmark evaluation asserting macro precision and recall exceed the quality gate thresholds (`precision >= 0.85`, `recall >= 0.90`) and verified impact analysis blast radius integration.
+
+### Phase 6: MCP Server, VS Code Extension & AI Agent Integration
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `McpDispatcher.kt`:
+    - Full toolset implementation with compliant JSON-RPC 2.0 and MCP protocol: `search_symbols` / `find_symbol`, `get_callers` / `find_callers`, `get_callees`, `get_test_coverage` / `find_related_tests`, `get_impact_analysis` / `analyze_change_impact`, `check_architecture_rules`, and `get_dependency_graph`.
+    - Token budget optimization with response capping, compact JSON serialization, and defensive input handling.
+  - `QueryModels.kt` & `RepoQueryEngine.kt`:
+    - Added `findCallees`, `checkArchitectureRules`, and `dependencyGraph` queries with support for package/module scopes.
+    - Updated `EdgeRow` to project source code line numbers from SQLite into queries.
+  - `JavaSemanticParser.kt`:
+    - Added MapStruct `@Mapper` semantic extraction mapping method parameter and return DTO / Entity types into `EdgeKind.USES` edges with `Confidence.CONFIRMED`.
+  - `apps/vscode-extension`:
+    - Scaffolded TypeScript extension (`package.json`, `tsconfig.json`, `src/extension.ts`, `README.md`) contributing `repomind.indexWorkspace`, `repomind.showImpact`, and `repomind.checkArchitectureRules` with editor diagnostics integration.

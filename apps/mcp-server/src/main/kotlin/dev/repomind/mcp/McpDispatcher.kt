@@ -1,8 +1,10 @@
 package dev.repomind.mcp
 
 import dev.repomind.core.query.CappedCallers
+import dev.repomind.core.query.CappedCallees
 import dev.repomind.core.query.CappedSymbols
 import dev.repomind.core.query.CappedTests
+import dev.repomind.core.query.DependencyGraphResult
 import dev.repomind.core.query.QueryEngineException
 import dev.repomind.core.query.RepoQueryEngine
 import kotlinx.serialization.Serializable
@@ -59,8 +61,18 @@ class McpDispatcher(private val serverName: String = "repomind", private val ser
     private fun toolsList(): JsonObject = buildJsonObject {
         put("tools", buildJsonArray {
             add(toolDef(
+                name = "search_symbols",
+                description = "Search indexed symbols by name prefix or query. Returns qualified names, kinds, file locations.",
+                props = mapOf(
+                    "repoPath" to "Absolute path to the analyzed repository root",
+                    "query" to "Symbol name query or prefix to search for",
+                    "limit" to "(optional) max results, default 20",
+                ),
+                required = listOf("repoPath"),
+            ))
+            add(toolDef(
                 name = "find_symbol",
-                description = "Search indexed symbols by name prefix. Returns qualified names, kinds, file locations.",
+                description = "Alias for search_symbols. Search indexed symbols by name prefix.",
                 props = mapOf(
                     "repoPath" to "Absolute path to the analyzed repository root",
                     "prefix" to "Symbol name prefix to search for",
@@ -69,7 +81,7 @@ class McpDispatcher(private val serverName: String = "repomind", private val ser
                 required = listOf("repoPath", "prefix"),
             ))
             add(toolDef(
-                name = "find_callers",
+                name = "get_callers",
                 description = "Direct and transitive callers of a symbol from the code graph.",
                 props = mapOf(
                     "repoPath" to "Absolute path to the analyzed repository root",
@@ -79,7 +91,27 @@ class McpDispatcher(private val serverName: String = "repomind", private val ser
                 required = listOf("repoPath", "symbol"),
             ))
             add(toolDef(
-                name = "find_related_tests",
+                name = "find_callers",
+                description = "Alias for get_callers. Direct and transitive callers of a symbol.",
+                props = mapOf(
+                    "repoPath" to "Absolute path to the analyzed repository root",
+                    "symbol" to "Fully-qualified symbol name",
+                    "limit" to "(optional) max results, default 20",
+                ),
+                required = listOf("repoPath", "symbol"),
+            ))
+            add(toolDef(
+                name = "get_callees",
+                description = "Direct and transitive callees (outgoing calls) of a symbol.",
+                props = mapOf(
+                    "repoPath" to "Absolute path to the analyzed repository root",
+                    "symbol" to "Fully-qualified symbol name (type or type#method)",
+                    "limit" to "(optional) max results, default 20",
+                ),
+                required = listOf("repoPath", "symbol"),
+            ))
+            add(toolDef(
+                name = "get_test_coverage",
                 description = "Tests that exercise the given production symbol directly.",
                 props = mapOf(
                     "repoPath" to "Absolute path to the analyzed repository root",
@@ -88,13 +120,49 @@ class McpDispatcher(private val serverName: String = "repomind", private val ser
                 required = listOf("repoPath", "symbol"),
             ))
             add(toolDef(
-                name = "analyze_change_impact",
-                description = "Deterministic impact analysis of changing a symbol: risk score 0-100 with level, evidence-traceable signals, caller/test reachability.",
+                name = "find_related_tests",
+                description = "Alias for get_test_coverage. Tests that exercise the given production symbol.",
+                props = mapOf(
+                    "repoPath" to "Absolute path to the analyzed repository root",
+                    "symbol" to "Fully-qualified production symbol name",
+                ),
+                required = listOf("repoPath", "symbol"),
+            ))
+            add(toolDef(
+                name = "get_impact_analysis",
+                description = "Deterministic impact analysis of changing a symbol: risk score 0-100, blast radius, evidence signals, confidence.",
                 props = mapOf(
                     "repoPath" to "Absolute path to the analyzed repository root",
                     "symbol" to "Fully-qualified symbol name being changed",
                 ),
                 required = listOf("repoPath", "symbol"),
+            ))
+            add(toolDef(
+                name = "analyze_change_impact",
+                description = "Alias for get_impact_analysis. Deterministic impact analysis of changing a symbol.",
+                props = mapOf(
+                    "repoPath" to "Absolute path to the analyzed repository root",
+                    "symbol" to "Fully-qualified symbol name being changed",
+                ),
+                required = listOf("repoPath", "symbol"),
+            ))
+            add(toolDef(
+                name = "check_architecture_rules",
+                description = "Evaluate architectural layering rules (from .repomind/rules.yaml) against the codebase index.",
+                props = mapOf(
+                    "repoPath" to "Absolute path to the analyzed repository root",
+                ),
+                required = listOf("repoPath"),
+            ))
+            add(toolDef(
+                name = "get_dependency_graph",
+                description = "Retrieve nodes and dependency edges for a package/module scope or full repository.",
+                props = mapOf(
+                    "repoPath" to "Absolute path to the analyzed repository root",
+                    "scope" to "(optional) package or module prefix filter",
+                    "limit" to "(optional) max edges, default 50",
+                ),
+                required = listOf("repoPath"),
             ))
         })
     }
@@ -131,18 +199,32 @@ class McpDispatcher(private val serverName: String = "repomind", private val ser
             val repoPath = Path.of(arg("repoPath"))
             RepoQueryEngine(repoPath.resolve(".repomind/index.db")).use { engine ->
                 val payload = when (name) {
-                    "find_symbol" -> {
+                    "find_symbol", "search_symbols" -> {
+                        val query = (args["query"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                            ?: (args["prefix"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                            ?: ""
                         val limit = (args["limit"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 20
-                        json.encodeToString(CappedSymbols.serializer(), engine.findSymbol(arg("prefix"), limit))
+                        json.encodeToString(CappedSymbols.serializer(), engine.findSymbol(query, limit))
                     }
-                    "find_callers" -> {
+                    "find_callers", "get_callers" -> {
                         val limit = (args["limit"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 20
                         json.encodeToString(CappedCallers.serializer(), engine.findCallers(arg("symbol"), limit))
                     }
-                    "find_related_tests" ->
+                    "find_callees", "get_callees" -> {
+                        val limit = (args["limit"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 20
+                        json.encodeToString(CappedCallees.serializer(), engine.findCallees(arg("symbol"), limit))
+                    }
+                    "find_related_tests", "get_test_coverage" ->
                         json.encodeToString(CappedTests.serializer(), engine.findRelatedTests(arg("symbol")))
-                    "analyze_change_impact" ->
+                    "analyze_change_impact", "get_impact_analysis" ->
                         json.encodeToString(dev.repomind.core.impact.ImpactReport.serializer(), engine.impact(arg("symbol")))
+                    "check_architecture_rules" ->
+                        json.encodeToString(dev.repomind.core.rules.RulesReport.serializer(), engine.checkArchitectureRules())
+                    "get_dependency_graph" -> {
+                        val scope = (args["scope"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                        val limit = (args["limit"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 50
+                        json.encodeToString(DependencyGraphResult.serializer(), engine.dependencyGraph(scope, limit))
+                    }
                     else -> return textResult("""{"error":"unknown tool: $name"}""", isError = true)
                 }
                 textResult(payload, isError = false)

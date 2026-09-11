@@ -88,6 +88,64 @@ class RepoQueryEngine(private val dbPath: Path, private val defaultLimit: Int = 
         )
     }
 
+    fun findCallees(symbol: String, limit: Int = defaultLimit): CappedCallees {
+        val owner = symbol.substringBefore('#')
+        val direct = graph.adjacency.outgoing[owner].orEmpty()
+            .filter { it.kind == EdgeKind.CALLS }
+            .map { it.targetFqn.substringBefore('#') }
+            .distinct()
+        val transitive = graph.transitiveCallees(owner)
+        val ordered = (direct + (transitive - direct.toSet())).sorted()
+        val truncated = ordered.size > limit
+        return CappedCallees(
+            symbol = symbol,
+            items = ordered.take(limit).map { CalleeHit(it) },
+            directCount = direct.size,
+            transitiveCount = transitive.size,
+            totalCount = ordered.size,
+            returnedCount = minOf(ordered.size, limit),
+            truncated = truncated,
+        )
+    }
+
+    fun checkArchitectureRules(): dev.repomind.core.rules.RulesReport {
+        val rulesPath = dbPath.resolveSibling("rules.yaml")
+        val altRulesPath = dbPath.parent?.parent?.resolve(".repomind/rules.yaml")
+        val finalPath = when {
+            Files.isRegularFile(rulesPath) -> rulesPath
+            altRulesPath != null && Files.isRegularFile(altRulesPath) -> altRulesPath
+            else -> null
+        }
+        if (finalPath == null) {
+            return dev.repomind.core.rules.RulesReport(evaluatedRules = 0, violations = emptyList(), checkedTypes = 0)
+        }
+        val rules = dev.repomind.core.rules.RuleLoader.load(finalPath)
+        val types = db.allTypes().map { row ->
+            dev.repomind.core.rules.TypeStereotypeInfo(row.qualifiedName, row.annotations)
+        }
+        val edges = db.edges.findAll().map { row ->
+            DependencyEdge(row.sourceFqn, row.targetFqn, EdgeKind.valueOf(row.kind), Confidence.valueOf(row.confidence), row.line)
+        }
+        return dev.repomind.core.rules.RuleEvaluator().evaluate(rules, types, edges)
+    }
+
+    fun dependencyGraph(scope: String? = null, limit: Int = defaultLimit): DependencyGraphResult {
+        val allEdges = db.edges.findAll()
+        val filteredEdges = if (scope.isNullOrBlank()) {
+            allEdges.take(limit)
+        } else {
+            allEdges.filter { it.sourceFqn.startsWith(scope) || it.targetFqn.startsWith(scope) }.take(limit)
+        }
+        val nodeIds = (filteredEdges.map { it.sourceFqn.substringBefore('#') } + filteredEdges.map { it.targetFqn.substringBefore('#') }).distinct().sorted()
+        return DependencyGraphResult(
+            scope = scope,
+            nodes = nodeIds.map { DependencyGraphNode(it) },
+            edges = filteredEdges.map { DependencyGraphEdge(it.sourceFqn, it.targetFqn, it.kind, it.confidence) },
+            totalNodes = nodeIds.size,
+            totalEdges = filteredEdges.size,
+        )
+    }
+
     fun impact(symbol: String): ImpactReport {
         val metaRow = db.findByFqn(symbol).firstOrNull() ?: db.findByFqn(symbol.substringBefore('#')).firstOrNull()
         val meta = metaRow?.let { SymbolMeta(kind = it.kind, visibility = it.visibility, annotations = it.annotations) }

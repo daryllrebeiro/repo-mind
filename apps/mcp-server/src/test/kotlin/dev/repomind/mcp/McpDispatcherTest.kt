@@ -42,11 +42,23 @@ class McpDispatcherTest {
     }
 
     @Test
-    fun `tools list exposes the four query tools`() {
+    fun `tools list exposes the full toolset`() {
         val response = dispatcher.handle("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}""")!!
 
-        for (tool in listOf("find_symbol", "find_callers", "find_related_tests", "analyze_change_impact")) {
-            assertTrue(response.contains(tool), "missing tool $tool")
+        for (tool in listOf(
+            "search_symbols",
+            "find_symbol",
+            "get_callers",
+            "find_callers",
+            "get_callees",
+            "get_test_coverage",
+            "find_related_tests",
+            "get_impact_analysis",
+            "analyze_change_impact",
+            "check_architecture_rules",
+            "get_dependency_graph",
+        )) {
+            assertTrue(response.contains(tool), "missing tool $tool in tools/list")
         }
     }
 
@@ -89,21 +101,36 @@ class McpDispatcherTest {
     fun `tools call executes find_callers and impact against real index`() {
         val repo = buildIndexedRepo().toString().replace('\\', '/')
         val callersResponse = dispatcher.handle(
-            """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"find_callers","arguments":{"repoPath":"$repo","symbol":"com.example.MailConfig"}}}""",
+            """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_callers","arguments":{"repoPath":"$repo","symbol":"com.example.MailConfig"}}}""",
         )!!
         assertTrue(callersResponse.contains("MailConfigTest") || callersResponse.contains("com.example"), callersResponse)
 
         val impactResponse = dispatcher.handle(
-            """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"analyze_change_impact","arguments":{"repoPath":"$repo","symbol":"com.example.MailConfig"}}}""",
+            """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_impact_analysis","arguments":{"repoPath":"$repo","symbol":"com.example.MailConfig"}}}""",
         )!!
         assertTrue(impactResponse.contains("score"), impactResponse)
         assertTrue(impactResponse.contains("level"), impactResponse)
+
+        val calleesResponse = dispatcher.handle(
+            """{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_callees","arguments":{"repoPath":"$repo","symbol":"com.example.MailConfig"}}}""",
+        )!!
+        assertTrue(calleesResponse.contains("callee") || calleesResponse.contains("symbol"), calleesResponse)
+
+        val rulesResponse = dispatcher.handle(
+            """{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"check_architecture_rules","arguments":{"repoPath":"$repo"}}}""",
+        )!!
+        assertTrue(rulesResponse.contains("evaluatedRules"), rulesResponse)
+
+        val graphResponse = dispatcher.handle(
+            """{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"get_dependency_graph","arguments":{"repoPath":"$repo"}}}""",
+        )!!
+        assertTrue(graphResponse.contains("nodes"), graphResponse)
     }
 
     @Test
     fun `tools call with missing repo reports error without crashing`() {
         val response = dispatcher.handle(
-            """{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"find_symbol","arguments":{"prefix":"X"}}}""",
+            """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"find_symbol","arguments":{"prefix":"X"}}}""",
         )!!
 
         assertTrue(response.contains("isError\\\":true") || response.contains("error"))

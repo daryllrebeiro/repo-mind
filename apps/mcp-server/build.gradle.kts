@@ -12,6 +12,7 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:query"))
     implementation(project(":core:impact"))
+    implementation(project(":core:rules"))
     implementation(libs.kotlinx.serialization.json)
     testImplementation(project(":language:java"))
     testImplementation(project(":storage:sqlite"))
