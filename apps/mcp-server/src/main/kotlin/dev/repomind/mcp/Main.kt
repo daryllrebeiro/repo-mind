@@ -7,7 +7,7 @@ fun main(args: Array<String>) {
     val stdout = System.out.bufferedWriter()
     try {
         while (true) {
-            val line = readLine() ?: break
+            val line = readlnOrNull() ?: break
             val response = dispatcher.handle(line) ?: continue
             stdout.write(response)
             stdout.newLine()

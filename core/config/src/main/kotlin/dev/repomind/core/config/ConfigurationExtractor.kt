@@ -44,6 +44,14 @@ class ConfigurationExtractor {
     private fun collectBindings(parsed: ModuleParse): List<ConfigBinding> {
         val bindings = mutableListOf<ConfigBinding>()
         for (type in parsed.types) {
+            val isConfigClass = type.annotations.any { it in setOf("Configuration", "SpringBootApplication") }
+            if (isConfigClass) {
+                bindings += ConfigBinding(
+                    propertyKey = type.fqn,
+                    targetFqn = type.fqn,
+                    kind = BindingKind.CONFIGURATION_CLASS,
+                )
+            }
             type.configPrefix?.let { prefix ->
                 bindings += ConfigBinding(
                     propertyKey = prefix,
@@ -61,8 +69,18 @@ class ConfigurationExtractor {
                     )
                 }
             }
+            for (method in type.methods.filter { !it.synthetic }) {
+                if ("Bean" in method.annotations) {
+                    bindings += ConfigBinding(
+                        propertyKey = method.name,
+                        targetFqn = "${type.fqn}#${method.name}",
+                        kind = BindingKind.BEAN_METHOD,
+                        memberName = method.name,
+                        returnType = method.returnType,
+                    )
+                }
+            }
         }
         return bindings
     }
 }
-

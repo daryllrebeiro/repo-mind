@@ -2,6 +2,8 @@ package dev.repomind.core.classpath
 
 import dev.repomind.core.model.BuildSystem
 import dev.repomind.core.model.RepoModule
+import dev.repomind.core.model.sha256Of
+import org.slf4j.LoggerFactory
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -13,16 +15,20 @@ class ClasspathResolver(
     private val gradleBinary: String = "gradle",
     private val allowNetwork: Boolean = false,
 ) {
+    private val logger = LoggerFactory.getLogger(ClasspathResolver::class.java)
 
     fun resolve(repoRoot: Path, module: RepoModule, buildSystem: BuildSystem): ResolvedClasspath {
         val buildFile = requireNotNull(module.buildFile) {
             "Module ${module.name} has no build file; cannot resolve classpath"
         }
-        val key = sha256(module.path.toAbsolutePath().normalize().toString() + ":network=$allowNetwork")
-        val buildFileHash = sha256(Files.readAllBytes(buildFile))
+        val key = sha256Of(module.path.toAbsolutePath().normalize().toString() + ":network=$allowNetwork")
+        val buildFileHash = sha256Of(Files.readAllBytes(buildFile))
+
+        logger.debug("Resolving classpath for module: ${module.name} with build system: $buildSystem")
 
         cache.load(key)?.let { cached ->
             if (cached.buildFileHash == buildFileHash) {
+                logger.info("Using cached classpath for module: ${module.name}")
                 return ResolvedClasspath(
                     module = module.path,
                     entries = cached.entries.map(Path::of),
@@ -31,6 +37,7 @@ class ClasspathResolver(
             }
         }
 
+        logger.info("Resolving fresh classpath for module: ${module.name}")
         val entries = when (buildSystem) {
             BuildSystem.MAVEN -> resolveMaven(module, buildFile)
             BuildSystem.GRADLE_GROOVY, BuildSystem.GRADLE_KOTLIN -> resolveGradle(repoRoot, module)
@@ -40,6 +47,7 @@ class ClasspathResolver(
             )
         }
 
+        logger.info("Resolved ${entries.size} classpath entries for module: ${module.name}")
         cache.store(key, CachedClasspath(buildFileHash = buildFileHash, entries = entries))
         return ResolvedClasspath(
             module = module.path,
@@ -51,6 +59,7 @@ class ClasspathResolver(
     private fun resolveMaven(module: RepoModule, pomFile: Path): List<String> {
         val outputFile = Files.createTempFile("repomind-cp-", ".txt")
         try {
+            logger.debug("Running Maven classpath resolution for module: ${module.name}")
             val result = commandRunner.run(
                 workDir = module.path,
                 command = listOf(
@@ -62,6 +71,7 @@ class ClasspathResolver(
                 ) + if (allowNetwork) emptyList() else listOf("--offline"),
             )
             if (result.exitCode != 0) {
+                logger.error("Maven classpath resolution failed for ${module.name}: ${result.stderr}")
                 throw ClasspathResolutionException(
                     moduleName = module.name,
                     message = "Maven classpath resolution failed for ${module.name} (exit ${result.exitCode})",
@@ -69,13 +79,16 @@ class ClasspathResolver(
                 )
             }
             if (!Files.isRegularFile(outputFile)) {
+                logger.error("Maven did not produce classpath output file for ${module.name}")
                 throw ClasspathResolutionException(
                     moduleName = module.name,
                     message = "Maven did not produce a classpath output file for ${module.name}",
                     stderr = result.stdout,
                 )
             }
-            return parseClasspath(Files.readString(outputFile), module.name)
+            val classpath = parseClasspath(Files.readString(outputFile), module.name)
+            logger.debug("Maven resolved ${classpath.size} entries for ${module.name}")
+            return classpath
         } finally {
             Files.deleteIfExists(outputFile)
         }
@@ -84,6 +97,7 @@ class ClasspathResolver(
     private fun resolveGradle(repoRoot: Path, module: RepoModule): List<String> {
         val initScript = Files.createTempFile("repomind-init-", ".gradle")
         try {
+            logger.debug("Running Gradle classpath resolution for module: ${module.name}")
             Files.writeString(
                 initScript,
                 """
@@ -116,6 +130,7 @@ class ClasspathResolver(
                 ) + if (allowNetwork) emptyList() else listOf("--offline"),
             )
             if (result.exitCode != 0) {
+                logger.error("Gradle classpath resolution failed for ${module.name}: ${result.stderr}")
                 throw ClasspathResolutionException(
                     moduleName = module.name,
                     message = "Gradle classpath resolution failed for ${module.name} (exit ${result.exitCode})",
@@ -124,13 +139,16 @@ class ClasspathResolver(
             }
             val between = extractBetween(result.stdout, "__CP_BEGIN__", "__CP_END__")
             if (between.isEmpty()) {
+                logger.error("Gradle produced no classpath markers for ${module.name}")
                 throw ClasspathResolutionException(
                     moduleName = module.name,
                     message = "Gradle produced no classpath markers for ${module.name}",
                     stderr = result.stdout,
                 )
             }
-            return between.map { it.trim() }.filter { it.isNotEmpty() }
+            val classpath = between.map { it.trim() }.filter { it.isNotEmpty() }
+            logger.debug("Gradle resolved ${classpath.size} entries for ${module.name}")
+            return classpath
         } finally {
             Files.deleteIfExists(initScript)
         }

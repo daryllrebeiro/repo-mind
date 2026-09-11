@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!--
+        RepoMind Logback configuration.
+
+        Default log level: INFO to stderr (stderr is used so logs never pollute the
+        machine-readable JSON that CLI commands write to stdout).
+
+        To increase verbosity at runtime, set the system property:
+            -Drepomind.log.level=DEBUG
+        This property can be set programmatically by a future -debug/-verbose CLI
+        flag before the Logback context is fully initialised.
+    -->
+
+    <property name="LOG_LEVEL" value="${repomind.log.level:-INFO}" />
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <!-- Write logs to stderr so they do not corrupt JSON stdout output -->
+        <target>System.err</target>
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %-5level [%logger{36}] %msg%n</pattern>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>${LOG_LEVEL}</level>
+        </filter>
+    </appender>
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>.repomind/logs/repomind.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>.repomind/logs/repomind.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%logger{36}] %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+        <appender-ref ref="FILE" />
+    </root>
+
+    <!-- Suppress noisy third-party libraries -->
+    <logger name="com.github.javaparser" level="WARN" />
+    <logger name="org.sqlite" level="WARN" />
+    <logger name="org.slf4j" level="WARN" />
+
+    <!-- Uncomment to enable DEBUG logging for all RepoMind components:
+    <logger name="dev.repomind" level="DEBUG" /> -->
+</configuration>

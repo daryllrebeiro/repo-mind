@@ -1,4 +1,4 @@
-﻿package dev.repomind.cli
+package dev.repomind.cli
 
 import dev.repomind.core.classpath.ClasspathResolutionException
 import dev.repomind.core.classpath.ClasspathResolver
@@ -22,12 +22,14 @@ import dev.repomind.core.rules.RuleEvaluator
 import dev.repomind.core.rules.RuleLoader
 import dev.repomind.core.rules.RulesReport
 import dev.repomind.core.rules.TypeStereotypeInfo
+import dev.repomind.core.model.RepoMindLimits
 import dev.repomind.core.model.BuildSystem
 import dev.repomind.core.scanner.RepositoryScanner
 import dev.repomind.language.java.JavaSemanticParser
 import dev.repomind.storage.sqlite.SymbolDatabase
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.slf4j.LoggerFactory
 import picocli.CommandLine
 import picocli.CommandLine.Command
 import picocli.CommandLine.Parameters
@@ -42,8 +44,10 @@ import kotlin.system.exitProcess
     subcommands = [ScanCommand::class, ClasspathCommand::class, ParseCommand::class, ConfigCommand::class, IndexCommand::class, EvalCommand::class, CallersCommand::class, ImpactCommand::class, UpdateCommand::class, RulesCommand::class, ReportCommand::class],
 )
 class RepomindCli : Runnable {
+    private val logger = LoggerFactory.getLogger(RepomindCli::class.java)
+
     override fun run() {
-        println("Use a subcommand: scan, classpath")
+        logger.info("No subcommand specified. Run with --help for a list of available commands.")
     }
 }
 
@@ -132,7 +136,7 @@ class ParseCommand : Runnable {
                         methodCount = parsed.types.sumOf { it.methods.size },
                         fieldCount = parsed.fieldsCount(),
                         unresolvedCount = parsed.unresolvedCount,
-                        unresolvedSymbols = parsed.unresolvedSymbols.take(20).map { "${it.symbol} (${it.filePath}:${it.line})" },
+                        unresolvedSymbols = parsed.unresolvedSymbols.take(RepoMindLimits.MAX_UNRESOLVED_LOG).map { "${it.symbol} (${it.filePath}:${it.line})" },
                         types = parsed.types.map { it.fqn },
                     ),
                 ),
@@ -172,13 +176,14 @@ class ConfigCommand : Runnable {
                     ConfigGraphDto(
                         module = graph.moduleName,
                         propertyCount = graph.properties.size,
-                        properties = graph.properties.take(50).map { "${it.key}=${it.value} (${it.sourceFile})" },
+                        properties = graph.properties.take(RepoMindLimits.MAX_CONFIG_PROPERTIES_DISPLAY).map { "${it.key}=${it.value} (${it.sourceFile})" },
                         bindings = graph.bindings.map {
                             BindingDto(
                                 propertyKey = it.propertyKey,
                                 targetFqn = it.targetFqn,
                                 kind = it.kind.name,
                                 memberName = it.memberName,
+                                returnType = it.returnType,
                             )
                         },
                     ),
@@ -194,6 +199,7 @@ data class BindingDto(
     val targetFqn: String,
     val kind: String,
     val memberName: String?,
+    val returnType: String? = null,
 )
 
 @Serializable
@@ -212,15 +218,34 @@ class IndexCommand : Runnable {
     override fun run() {
         val startedAt = System.nanoTime()
         val scan = RepositoryScanner().scan(dev.repomind.core.model.PathGuard.requireDirectory(root))
+        val resolver = ClasspathResolver(cache = FileBasedClasspathCache(scan.root.resolve(".repomind/cache/classpath")))
         val parser = JavaSemanticParser()
         SymbolDatabase.open(scan.root.resolve(".repomind/index.db")).use { db ->
             var symbolCount = 0
             var edgeCount = 0
             for (module in scan.modules) {
-                val parsed = parser.parseModule(module, emptyList())
+                db.recordModule(module.name, module.path.toString(), scan.buildSystem.name)
+                val jars = try {
+                    resolver.resolve(scan.root, module, scan.buildSystem).entries
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                val parsed = parser.parseModule(module, jars)
                 symbolCount += db.replaceModule(module.name, parsed)
                 edgeCount += db.edges.replaceModule(module.name, parsed.edges)
+
+                val fileStates = mutableMapOf<String, String>()
+                for (sourceRoot in module.sourceRoots) {
+                    sourceRoot.path.toFile().walkTopDown()
+                        .filter { it.isFile && it.extension in RepositoryScanner.JAVA_EXTENSIONS }
+                        .forEach { file ->
+                            val rel = scan.root.relativize(file.toPath()).toString().replace('\\', '/')
+                            fileStates[rel] = dev.repomind.core.model.sha256Of(java.nio.file.Files.readAllBytes(file.toPath()))
+                        }
+                }
+                db.setFileStates(module.name, fileStates)
             }
+            val report = db.confidenceReport()
             val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
             println(
                 Json.encodeToString(
@@ -229,8 +254,10 @@ class IndexCommand : Runnable {
                         modules = scan.modules.size,
                         symbolsIndexed = symbolCount,
                         edgesIndexed = edgeCount,
-                        totalSymbols = db.count(),
-                        totalEdges = db.edges.count(),
+                        totalSymbols = report.totalSymbols,
+                        totalEdges = report.totalEdges,
+                        totalUnresolved = report.totalUnresolved,
+                        confidenceRate = report.confidenceRate,
                         elapsedMs = elapsedMs,
                     ),
                 ),
@@ -246,6 +273,8 @@ data class IndexResultDto(
     val edgesIndexed: Int,
     val totalSymbols: Long,
     val totalEdges: Long,
+    val totalUnresolved: Long,
+    val confidenceRate: Double,
     val elapsedMs: Long,
 )
 

@@ -2,17 +2,12 @@ package dev.repomind.core.index
 
 import dev.repomind.core.model.RepoModule
 import dev.repomind.core.model.code.EdgeKind
+import dev.repomind.core.model.sha256Of
 import dev.repomind.core.scanner.RepositoryScanner
 import dev.repomind.language.java.JavaSemanticParser
 import dev.repomind.storage.sqlite.SymbolDatabase
 import java.nio.file.Files
 import java.nio.file.Path
-import java.security.MessageDigest
-
-fun sha256Of(bytes: ByteArray): String =
-    MessageDigest.getInstance("SHA-256")
-        .digest(bytes)
-        .joinToString("") { "%02x".format(it) }
 
 class IncrementalIndexer(private val dbPath: Path) {
 

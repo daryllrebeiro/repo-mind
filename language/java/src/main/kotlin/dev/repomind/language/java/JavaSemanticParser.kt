@@ -3,16 +3,16 @@ package dev.repomind.language.java
 import com.github.javaparser.ParserConfiguration
 import com.github.javaparser.StaticJavaParser
 import com.github.javaparser.ast.Modifier
+import com.github.javaparser.ast.body.AnnotationDeclaration
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration
 import com.github.javaparser.ast.body.EnumDeclaration
 import com.github.javaparser.ast.body.RecordDeclaration
-import com.github.javaparser.ast.body.AnnotationDeclaration
 import com.github.javaparser.ast.body.TypeDeclaration
 import com.github.javaparser.ast.nodeTypes.NodeWithModifiers
 import com.github.javaparser.ast.type.ClassOrInterfaceType
+import com.github.javaparser.resolution.UnsolvedSymbolException
 import com.github.javaparser.symbolsolver.JavaSymbolSolver
 import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFacade
-import com.github.javaparser.resolution.UnsolvedSymbolException
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JarTypeSolver
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver
@@ -43,7 +43,7 @@ class JavaSemanticParser {
         val types = mutableListOf<ParsedType>()
         val unresolved = mutableListOf<UnresolvedSymbol>()
         val importsByType = mutableMapOf<String, List<Pair<String, Int>>>()
-        val cusByType = mutableMapOf<String, Pair<com.github.javaparser.ast.CompilationUnit, com.github.javaparser.ast.body.TypeDeclaration<*>>>()
+        val cusByType = mutableMapOf<String, Pair<com.github.javaparser.ast.CompilationUnit, TypeDeclaration<*>>>()
         val filesByType = mutableMapOf<String, Path>()
 
         for (sourceRoot in module.sourceRoots) {
@@ -55,13 +55,22 @@ class JavaSemanticParser {
                         .filter { !it.isStatic && !it.isAsterisk }
                         .map { it.name.asString() to it.range.map { r -> r.begin.line }.orElse(0) }
                     for (typeDecl in cu.types) {
-                        extractType(typeDecl, pkg, file, unresolved, sourceRoot.isTest)?.let { parsed ->
-                            types += parsed
-                            if (imports.isNotEmpty()) {
-                                importsByType[parsed.fqn] = imports
+                        try {
+                            extractType(typeDecl, pkg, file, unresolved, sourceRoot.isTest)?.let { parsed ->
+                                types += parsed
+                                if (imports.isNotEmpty()) {
+                                    importsByType[parsed.fqn] = imports
+                                }
+                                cusByType[parsed.fqn] = cu to typeDecl
+                                filesByType[parsed.fqn] = file
                             }
-                            cusByType[parsed.fqn] = cu to typeDecl
-                            filesByType[parsed.fqn] = file
+                        } catch (e: Exception) {
+                            unresolved += UnresolvedSymbol(
+                                symbol = typeDecl.nameAsString,
+                                filePath = file.toString(),
+                                line = typeDecl.range.map { r -> r.begin.line }.orElse(0),
+                                reason = "${e.javaClass.simpleName}: ${e.message}",
+                            )
                         }
                     }
                 } catch (e: Exception) {
@@ -69,15 +78,17 @@ class JavaSemanticParser {
                         symbol = "<parse-error: ${e.javaClass.simpleName}>",
                         filePath = file.toString(),
                         line = 0,
+                        reason = e.message ?: e.javaClass.name,
                     )
                 }
             }
         }
 
         val edges = buildEdges(types, importsByType).toMutableList()
-        edges += extractCalls(typeSolver, types, cusByType, filesByType)
+        edges += extractCalls(typeSolver, types, cusByType, filesByType, unresolved)
 
-        val confirmedPairs = edges.filter { it.confidence == Confidence.CONFIRMED }.map { Triple(it.sourceFqn, it.targetFqn, it.kind) }.toSet()
+        val confirmedPairs = edges.filter { it.confidence == Confidence.CONFIRMED }
+            .map { Triple(it.sourceFqn, it.targetFqn, it.kind) }.toSet()
         val deduped = edges.filterNot { e ->
             e.confidence == Confidence.POSSIBLE && Triple(e.sourceFqn, e.targetFqn, e.kind) in confirmedPairs
         }
@@ -93,8 +104,9 @@ class JavaSemanticParser {
     private fun extractCalls(
         typeSolver: CombinedTypeSolver,
         types: List<ParsedType>,
-        cusByType: Map<String, Pair<com.github.javaparser.ast.CompilationUnit, com.github.javaparser.ast.body.TypeDeclaration<*>>>,
+        cusByType: Map<String, Pair<com.github.javaparser.ast.CompilationUnit, TypeDeclaration<*>>>,
         filesByType: Map<String, Path>,
+        unresolved: MutableList<UnresolvedSymbol>,
     ): List<DependencyEdge> {
         val projectTypes = types.map { it.fqn }.toSet()
         val implsByInterface = buildMap<String, MutableList<String>> {
@@ -130,7 +142,20 @@ class JavaSemanticParser {
                         }
                     }
                     continue
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    // Check if it is an unresolved symbol from call expression
+                    if (e is UnsolvedSymbolException) {
+                        // Soft degradation: capture if qualified or meaningful
+                        val callName = call.nameAsString
+                        if (callName.isNotEmpty()) {
+                            unresolved += UnresolvedSymbol(
+                                symbol = callName,
+                                filePath = file.toString(),
+                                line = line,
+                                reason = e.message ?: "Unsolved method call",
+                            )
+                        }
+                    }
                 }
 
                 val scopeName = (call.scope.orElse(null) as? com.github.javaparser.ast.expr.NameExpr)?.nameAsString
@@ -312,6 +337,8 @@ class JavaSemanticParser {
                     isStatic = m.isStatic,
                     isAbstract = m.isAbstract,
                     line = m.range.map { it.begin.line }.orElse(0),
+                    annotations = m.annotations.map { it.nameAsString.substringAfterLast('.') },
+                    returnType = try { m.type.asString() } catch (_: Exception) { null },
                 )
             })
             addAll(LombokSynthesizer.synthesizeMembers(typeDecl))
@@ -381,11 +408,24 @@ class JavaSemanticParser {
     ): String? = try {
         (type.resolve() as? com.github.javaparser.resolution.types.ResolvedReferenceType)?.qualifiedName
     } catch (e: UnsolvedSymbolException) {
-        unresolved += UnresolvedSymbol(type.asString(), file.toString(), type.range.map { it.begin.line }.orElse(0))
+        val line = type.range.map { it.begin.line }.orElse(0)
+        unresolved += UnresolvedSymbol(
+            symbol = type.asString(),
+            filePath = file.toString(),
+            line = line,
+            reason = e.message ?: "Unsolved symbol: ${type.asString()}",
+        )
         null
     } catch (_: UnsupportedOperationException) {
         null
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        val line = type.range.map { it.begin.line }.orElse(0)
+        unresolved += UnresolvedSymbol(
+            symbol = type.asString(),
+            filePath = file.toString(),
+            line = line,
+            reason = "${e.javaClass.simpleName}: ${e.message}",
+        )
         null
     }
 
@@ -407,5 +447,3 @@ class JavaSemanticParser {
         }
     }
 }
-
-

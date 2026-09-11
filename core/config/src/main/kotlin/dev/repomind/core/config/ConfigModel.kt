@@ -9,7 +9,12 @@ data class ConfigProperty(
     val sourceFile: String,
 )
 
-enum class BindingKind { CONFIGURATION_PROPERTIES, VALUE_ANNOTATION }
+enum class BindingKind {
+    CONFIGURATION_PROPERTIES,
+    VALUE_ANNOTATION,
+    BEAN_METHOD,
+    CONFIGURATION_CLASS,
+}
 
 @Serializable
 data class ConfigBinding(
@@ -17,6 +22,7 @@ data class ConfigBinding(
     val targetFqn: String,
     val kind: BindingKind,
     val memberName: String? = null,
+    val returnType: String? = null,
 )
 
 data class ConfigGraph(

@@ -132,5 +132,49 @@ class ConfigurationExtractorTest {
         val port = graph.properties.first { it.key == "server.port" }
         assertEquals("9090", port.value)
     }
+
+    @Test
+    fun `extracts configuration class and bean methods`() {
+        val configType = ParsedType(
+            fqn = "com.example.AppConfig",
+            kind = TypeKind.CLASS,
+            packageName = "com.example",
+            filePath = "/x/AppConfig.java",
+            lineStart = 1,
+            lineEnd = 20,
+            annotations = listOf("Configuration"),
+            superTypeFqn = null,
+            interfaceFqns = emptyList(),
+            methods = listOf(
+                ParsedMethod(
+                    name = "dataSource",
+                    signature = "dataSource()",
+                    visibility = Visibility.PUBLIC,
+                    isStatic = false,
+                    isAbstract = false,
+                    line = 5,
+                    annotations = listOf("Bean"),
+                    returnType = "javax.sql.DataSource",
+                ),
+            ),
+            fields = emptyList(),
+        )
+        val parsed = ModuleParse(
+            moduleName = "cfg-module",
+            types = listOf(configType),
+            unresolvedSymbols = emptyList(),
+        )
+        val module = moduleWithResources()
+        val graph = ConfigurationExtractor().extract(module, parsed)
+
+        assertEquals(2, graph.bindings.size)
+        val configBinding = graph.bindings.first { it.kind == BindingKind.CONFIGURATION_CLASS }
+        assertEquals("com.example.AppConfig", configBinding.targetFqn)
+
+        val beanBinding = graph.bindings.first { it.kind == BindingKind.BEAN_METHOD }
+        assertEquals("dataSource", beanBinding.propertyKey)
+        assertEquals("com.example.AppConfig#dataSource", beanBinding.targetFqn)
+        assertEquals("javax.sql.DataSource", beanBinding.returnType)
+    }
 }
 

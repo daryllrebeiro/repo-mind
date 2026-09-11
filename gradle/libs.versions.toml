@@ -6,6 +6,14 @@ junit = "6.1.3"
 javaparser = "3.28.2"
 snakeyaml = "2.6"
 sqliteJdbc = "3.53.2.1"
+slf4j = "2.0.9"
+logback = "1.4.11"
+detekt = "1.23.4"
+# ktlintPlugin: the Gradle plugin artifact version (org.jlleitschuh.gradle.ktlint)
+ktlintPlugin = "14.2.0"
+# ktlint: the KtLint CLI tool version downloaded/run by the plugin
+ktlint = "1.2.1"
+jacoco = "0.8.11"
 
 [libraries]
 picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
@@ -16,7 +24,13 @@ javaparser-core = { module = "com.github.javaparser:javaparser-core", version.re
 javaparser-symbol-solver-core = { module = "com.github.javaparser:javaparser-symbol-solver-core", version.ref = "javaparser" }
 snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqliteJdbc" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+detekt-formatting = { module = "io.gitlab.arturbosch.detekt:detekt-formatting", version.ref = "detekt" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlintPlugin" }
+jacoco = { id = "jacoco", version.ref = "jacoco" }

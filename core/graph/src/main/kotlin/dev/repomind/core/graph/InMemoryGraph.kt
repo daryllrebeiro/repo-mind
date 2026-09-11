@@ -1,8 +1,10 @@
 package dev.repomind.core.graph
 
+import dev.repomind.core.model.RepoMindLimits
 import dev.repomind.core.model.code.Confidence
 import dev.repomind.core.model.code.DependencyEdge
 import dev.repomind.core.model.code.EdgeKind
+
 
 enum class TraverseDirection { OUTGOING, INCOMING }
 
@@ -36,8 +38,8 @@ class InMemoryGraph(edges: Collection<DependencyEdge>) {
         start: String,
         direction: TraverseDirection,
         kinds: Set<EdgeKind>,
-        maxDepth: Int = Int.MAX_VALUE,
-        maxNodes: Int = 100_000,
+        maxDepth: Int = RepoMindLimits.DEFAULT_GRAPH_DEPTH,
+        maxNodes: Int = RepoMindLimits.MAX_GRAPH_NODES,
     ): Set<String> {
         val visited = mutableSetOf(start)
         var frontier = listOf(start)

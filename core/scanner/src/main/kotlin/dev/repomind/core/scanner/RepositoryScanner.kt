@@ -1,6 +1,7 @@
 package dev.repomind.core.scanner
 
 import dev.repomind.core.model.BuildSystem
+import dev.repomind.core.model.RepoMindLimits
 import dev.repomind.core.model.RepoModule
 import dev.repomind.core.model.ScanResult
 import dev.repomind.core.model.SourceRoot
@@ -46,7 +47,7 @@ class RepositoryScanner {
 
     private fun collectMavenModules(dir: Path, repoRoot: Path, matcher: IgnoreMatcher, out: MutableList<RepoModule>) {
         val pom = dir.resolve("pom.xml")
-        if (!pom.toFile().isFile || out.size > 200) return
+        if (!pom.toFile().isFile || out.size > RepoMindLimits.MAX_MODULES) return
         out += moduleFor(dir, pom, matcher)
         for (child in declaredMavenSubmodules(pom)) {
             val sub = dir.resolve(child).normalize()

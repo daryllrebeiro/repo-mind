@@ -24,6 +24,8 @@ data class ParsedMethod(
     val isAbstract: Boolean,
     val synthetic: Boolean = false,
     val line: Int,
+    val annotations: List<String> = emptyList(),
+    val returnType: String? = null,
 )
 
 data class ParsedField(
@@ -57,6 +59,7 @@ data class UnresolvedSymbol(
     val symbol: String,
     val filePath: String,
     val line: Int,
+    val reason: String? = null,
 )
 
 data class ModuleParse(

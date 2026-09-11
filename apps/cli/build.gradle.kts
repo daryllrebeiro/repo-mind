@@ -21,8 +21,11 @@ dependencies {
     implementation(project(":core:query"))
     implementation(project(":core:rules"))
     implementation(project(":core:report"))
+    implementation(project(":core:jdk"))
     implementation(project(":storage:sqlite"))
     implementation(project(":language:java"))
     implementation(libs.picocli)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.slf4j.api)
+    implementation(libs.logback.classic)
 }

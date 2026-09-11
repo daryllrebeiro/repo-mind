@@ -1,13 +1,6 @@
-plugins {
-    alias(libs.plugins.kotlin.serialization)
-}
-
 dependencies {
     implementation(project(":core:model"))
-    implementation(project(":core:jdk"))
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.slf4j.api)
-    implementation(libs.logback.classic)
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(kotlin("test"))

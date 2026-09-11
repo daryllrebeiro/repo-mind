@@ -1,9 +1,9 @@
 package dev.repomind.core.classpath
 
+import dev.repomind.core.model.sha256Of
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.Path
-import java.security.MessageDigest
 
 interface ClasspathCache {
     fun load(key: String): CachedClasspath?
@@ -33,15 +33,6 @@ class FileBasedClasspathCache(private val cacheDir: Path) : ClasspathCache {
         Files.writeString(file, json.encodeToString(CachedClasspath.serializer(), value))
     }
 
-    private fun fileFor(key: String): Path = cacheDir.resolve("${sha256(key)}.json")
+    private fun fileFor(key: String): Path = cacheDir.resolve("${sha256Of(key)}.json")
 }
 
-fun sha256(input: String): String =
-    MessageDigest.getInstance("SHA-256")
-        .digest(input.toByteArray())
-        .joinToString("") { "%02x".format(it) }
-
-fun sha256(bytes: ByteArray): String =
-    MessageDigest.getInstance("SHA-256")
-        .digest(bytes)
-        .joinToString("") { "%02x".format(it) }

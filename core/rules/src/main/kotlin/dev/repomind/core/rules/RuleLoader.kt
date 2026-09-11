@@ -40,7 +40,7 @@ object RuleLoader {
             ?: throw RuleLoaderException("rules[$index] missing 'to'")
 
         @Suppress("UNCHECKED_CAST")
-        val edgeKinds = (map["edgeKinds"] as? List<String>)?.map { it.toString().uppercase() }
+        val edgeKinds = (map["edgeKinds"] as? List<String>)?.map { it.uppercase() }
             ?: listOf("CALLS", "USES")
 
         return RuleDef(
