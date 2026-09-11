@@ -4,6 +4,7 @@ plugins {
 
 dependencies {
     implementation(project(":core:model"))
+    implementation(project(":core:graph"))
     implementation(project(":core:scanner"))
     implementation(project(":language:java"))
     implementation(project(":storage:sqlite"))

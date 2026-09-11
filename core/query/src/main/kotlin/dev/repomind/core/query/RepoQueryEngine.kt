@@ -1,6 +1,6 @@
 package dev.repomind.core.query
 
-import dev.repomind.core.graph.InMemoryGraph
+import dev.repomind.core.graph.GraphStore
 import dev.repomind.core.impact.ImpactAnalyzer
 import dev.repomind.core.impact.ImpactReport
 import dev.repomind.core.impact.SymbolMeta
@@ -14,23 +14,14 @@ import java.nio.file.Path
 class RepoQueryEngine(private val dbPath: Path, private val defaultLimit: Int = 20) : AutoCloseable {
 
     private val db: SymbolDatabase
-    private val graph: InMemoryGraph
+    private val graph: GraphStore
 
     init {
         if (!Files.isRegularFile(dbPath)) {
             throw QueryEngineException("no index at $dbPath — run 'repomind index <repo>' first")
         }
         db = SymbolDatabase.open(dbPath)
-        graph = InMemoryGraph(
-            db.edges.findAll().map { row ->
-                DependencyEdge(
-                    sourceFqn = row.sourceFqn,
-                    targetFqn = row.targetFqn,
-                    kind = EdgeKind.valueOf(row.kind),
-                    confidence = Confidence.valueOf(row.confidence),
-                )
-            },
-        )
+        graph = db.graphStore
     }
 
     fun findSymbol(prefix: String, limit: Int = defaultLimit): CappedSymbols {
@@ -52,8 +43,7 @@ class RepoQueryEngine(private val dbPath: Path, private val defaultLimit: Int = 
 
     fun findCallers(symbol: String, limit: Int = defaultLimit): CappedCallers {
         val owner = symbol.substringBefore('#')
-        val direct = graph.adjacency.incoming[owner].orEmpty()
-            .filter { it.kind == EdgeKind.CALLS }
+        val direct = graph.findDirectCallers(owner)
             .map { it.sourceFqn.substringBefore('#') }
             .distinct()
         val transitive = graph.transitiveCallers(owner)
@@ -71,13 +61,10 @@ class RepoQueryEngine(private val dbPath: Path, private val defaultLimit: Int = 
     }
 
     fun findRelatedTests(symbol: String, limit: Int = defaultLimit): CappedTests {
-        val tests = graph.adjacency.incoming[symbol].orEmpty()
-            .filter { it.kind == EdgeKind.TESTS && it.confidence == Confidence.CONFIRMED }
-            .map { it.sourceFqn } +
-            graph.adjacency.incoming[symbol].orEmpty()
-                .filter { it.kind == EdgeKind.TESTS && it.confidence == Confidence.POSSIBLE }
-                .map { it.sourceFqn }
-        val distinctOrdered = tests.distinct().sorted()
+        val distinctOrdered = graph.findRelatedTests(symbol)
+            .map { it.sourceFqn }
+            .distinct()
+            .sorted()
         val truncated = distinctOrdered.size > limit
         return CappedTests(
             symbol = symbol,
@@ -90,8 +77,7 @@ class RepoQueryEngine(private val dbPath: Path, private val defaultLimit: Int = 
 
     fun findCallees(symbol: String, limit: Int = defaultLimit): CappedCallees {
         val owner = symbol.substringBefore('#')
-        val direct = graph.adjacency.outgoing[owner].orEmpty()
-            .filter { it.kind == EdgeKind.CALLS }
+        val direct = graph.findDirectCallees(owner)
             .map { it.targetFqn.substringBefore('#') }
             .distinct()
         val transitive = graph.transitiveCallees(owner)

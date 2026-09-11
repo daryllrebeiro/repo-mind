@@ -1,9 +1,11 @@
 plugins {
     alias(libs.plugins.kotlin.serialization)
+    `java-library`
 }
 
 dependencies {
-    implementation(project(":core:model"))
+    api(project(":core:model"))
+    api(project(":core:graph"))
     implementation(project(":core:config"))
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.sqlite.jdbc)

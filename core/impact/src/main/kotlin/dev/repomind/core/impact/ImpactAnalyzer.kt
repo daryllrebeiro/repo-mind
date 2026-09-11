@@ -1,6 +1,6 @@
 package dev.repomind.core.impact
 
-import dev.repomind.core.graph.InMemoryGraph
+import dev.repomind.core.graph.GraphStore
 import dev.repomind.core.model.code.EdgeKind
 import dev.repomind.core.model.code.TypeKind
 
@@ -13,7 +13,7 @@ data class SymbolMeta(
 )
 
 class ImpactAnalyzer(
-    private val graph: InMemoryGraph,
+    private val graph: GraphStore,
     private val weights: ImpactWeights = ImpactWeights(),
     private val topCallersLimit: Int = 50,
     private val violatingSymbols: Set<String> = emptySet(),
@@ -23,8 +23,8 @@ class ImpactAnalyzer(
 
     fun analyze(symbolFqn: String, meta: SymbolMeta?): ImpactReport {
         val owner = symbolFqn.substringBefore('#')
-        val incomingEdges = graph.adjacency.incoming[owner].orEmpty().filter { it.kind == EdgeKind.CALLS } +
-            (if ('#' in symbolFqn) graph.adjacency.incoming[symbolFqn].orEmpty().filter { it.kind == EdgeKind.CALLS } else emptyList())
+        val incomingEdges = graph.findDirectCallers(owner) +
+            (if ('#' in symbolFqn) graph.findDirectCallers(symbolFqn) else emptyList())
 
         val directCallers = incomingEdges
             .map { if (it.callerMember != null) "${it.sourceFqn}#${it.callerMember}" else it.sourceFqn }
@@ -45,7 +45,7 @@ class ImpactAnalyzer(
         val transitiveCallers = graph.transitiveCallers(owner)
         val dependents = graph.transitiveDependents(owner)
         val affectedTests = graph.affectedTests(owner).sorted()
-        val fanOut = graph.adjacency.outgoing[owner].orEmpty()
+        val fanOut = graph.findDirectCallees(owner)
             .count { it.kind == EdgeKind.CALLS }
 
         val isPublicApi = meta?.let { it.visibility == "PUBLIC" || it.kind == TypeKind.INTERFACE.name } ?: false

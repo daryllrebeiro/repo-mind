@@ -35,6 +35,7 @@ data class ConfidenceReport(
 class SymbolDatabase private constructor(private val connection: Connection) : AutoCloseable {
 
     val edges: EdgeRepository = EdgeRepository(connection)
+    val graphStore: dev.repomind.core.graph.GraphStore get() = edges
 
     init {
         connection.createStatement().use { stmt ->
