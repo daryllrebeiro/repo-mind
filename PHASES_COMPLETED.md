@@ -188,5 +188,48 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
     - Added unit test coverage for multi-hop transitive caller chains, transitive callee chains, cyclic dependency termination, and multi-hop affected test mapping.
   - Full project test suite and static analysis (`./gradlew test detekt ktlintCheck`) fully passing (86 actionable tasks, 0 failures).
 
+#### Task 2.2: Kotlin Semantic Parser Enhancements
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `core:model` (`KotlinSemanticParser.kt`):
+    - Added support for Kotlin extension functions (`fun Receiver.method(...)`), extracting receiver types and emitting `USES` dependency edges with `Confidence.CONFIRMED`.
+    - Added extraction for companion objects, standalone `object` singletons, and constructor injection annotations (`@Inject`, `@Autowired`, `@Named`).
+    - Handled top-level functions and properties in files without enclosing class definitions, mapping them to synthetic `${FileName}Kt` classes adhering to standard JVM bytecode conventions.
+    - Added lambda and higher-order function call pattern detection.
+  - `MultiLanguageParserTest.kt`:
+    - Added unit tests for Kotlin extension functions, receiver resolution, and companion objects.
+
+#### Task 2.3: Background Daemon & File Watcher Mode
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `core:index` (`RepositoryWatcher.kt`):
+    - Built file system watcher backed by `java.nio.file.WatchService` with recursive directory registration.
+    - Integrated ignore filtering for `.git`, `.repomind`, `build`, `target`, `.gradle`, `.idea`, and ephemeral/binary files.
+    - Implemented event debouncing (`debounceMs`, default 300ms) to coalesce rapid bursts of editor save events.
+    - Added lifecycle control (`start`, `stop`, `timeoutMs`, `maxIterations`) to support both interactive background execution and bounded automated testing.
+  - `apps:cli` (`Main.kt`):
+    - Registered `repomind watch <repo>` CLI command with `--debounce-ms`, `--timeout-ms`, `--max-iterations`, and `--quiet` options.
+    - Added graceful shutdown hook on SIGINT / Ctrl+C.
+  - `RepositoryWatcherTest.kt` & `CliCommandsTest.kt`:
+    - Validated ignore filtering, file change detection, debounce coalescing, and CLI command execution.
+
+#### Task 2.4: Architecture Linting Ruleset Expansion
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `core:rules` (`CycleDetector.kt`):
+    - Implemented Tarjan's Strongly Connected Components (SCC) algorithm for package-level dependency cycle detection.
+    - Generates evidence-traceable cycle paths with sample offending dependency edges.
+  - `core:rules` (`ArchitecturePreset.kt`):
+    - Provided built-in presets: `HEXAGONAL` (Ports & Adapters), `CLEAN` (Clean Architecture Dependency Rule), and `THREE_TIER` (Presentation / Service / Repository).
+    - Added automatic base package scoping with dot-safe regex patterns.
+  - `core:rules` (`RuleGenerator.kt`):
+    - Added automated `.repomind/rules.yaml` template generator inferring common base packages from indexed code symbols.
+  - `apps:cli` (`Main.kt`):
+    - Registered `repomind init <repo> [--preset=<name>]` command.
+    - Added `--check-cycles`, `--preset=<name>`, and `--fail-on-violation` options to `repomind rules`.
+  - `ArchitectureRulesTest.kt` & `CliCommandsTest.kt`:
+    - Verified cycle detection (2-node and multi-hop cycles), acyclic graphs, preset generation, and CLI commands.
+  - All 89 Gradle tasks passing across 15 modules with 0 lint warnings (`./gradlew test detekt ktlintCheck`).
+
 
 

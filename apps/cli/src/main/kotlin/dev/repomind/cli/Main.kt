@@ -41,7 +41,21 @@ import kotlin.system.exitProcess
     mixinStandardHelpOptions = true,
     version = ["repomind 0.1.0"],
     description = ["Codebase intelligence engine for AI agents."],
-    subcommands = [ScanCommand::class, ClasspathCommand::class, ParseCommand::class, ConfigCommand::class, IndexCommand::class, EvalCommand::class, CallersCommand::class, ImpactCommand::class, UpdateCommand::class, RulesCommand::class, ReportCommand::class],
+    subcommands = [
+        ScanCommand::class,
+        ClasspathCommand::class,
+        ParseCommand::class,
+        ConfigCommand::class,
+        IndexCommand::class,
+        EvalCommand::class,
+        CallersCommand::class,
+        ImpactCommand::class,
+        UpdateCommand::class,
+        RulesCommand::class,
+        ReportCommand::class,
+        WatchCommand::class,
+        InitCommand::class,
+    ],
 )
 class RepomindCli : Runnable {
     private val logger = LoggerFactory.getLogger(RepomindCli::class.java)
@@ -401,23 +415,153 @@ class RulesCommand : Runnable {
     @Parameters(index = "1", description = ["Optional rules YAML path"], arity = "0..1")
     var rulesFile: Path? = null
 
+    @picocli.CommandLine.Option(
+        names = ["--check-cycles"],
+        description = ["Detect circular dependencies between packages"],
+    )
+    var checkCycles: Boolean = false
+
+    @picocli.CommandLine.Option(
+        names = ["--preset"],
+        description = ["Apply built-in architecture preset: hexagonal, clean, three-tier"],
+    )
+    var presetName: String? = null
+
+    @picocli.CommandLine.Option(
+        names = ["--fail-on-violation"],
+        description = ["Exit with status code 1 if architecture violations are found"],
+    )
+    var failOnViolation: Boolean = false
+
     override fun run() {
         val dbPath = root.toAbsolutePath().normalize().resolve(".repomind/index.db")
         if (!java.nio.file.Files.isRegularFile(dbPath)) {
-            System.err.println("ERROR: no index at $dbPath â€” run 'repomind index <repo>' first")
+            System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
             kotlin.system.exitProcess(1)
         }
         val rulesPath = rulesFile ?: dbPath.resolveSibling("rules.yaml")
-        val rules = RuleLoader.load(rulesPath)
+        val fileRules = RuleLoader.load(rulesPath)
+        val presetRules = presetName?.let { id ->
+            val p = dev.repomind.core.rules.ArchitecturePreset.fromId(id)
+            if (p != null) dev.repomind.core.rules.ArchitecturePreset.generateRules(p) else null
+        }
+        val rules = presetRules ?: fileRules
+
         SymbolDatabase.open(dbPath).use { db ->
             val report = RuleEvaluator().evaluate(
-                rules,
-                db.allTypes().map { TypeStereotypeInfo(it.qualifiedName, it.annotations) },
-                db.edges.findAll().map { row ->
+                rules = rules,
+                types = db.allTypes().map { TypeStereotypeInfo(it.qualifiedName, it.annotations) },
+                edges = db.edges.findAll().map { row ->
                     DependencyEdge(row.sourceFqn, row.targetFqn, EdgeKind.valueOf(row.kind), Confidence.valueOf(row.confidence))
                 },
+                failOnViolation = false,
+                checkCycles = checkCycles,
             )
             println(Json.encodeToString(RulesReport.serializer(), report))
+
+            if (failOnViolation && !report.passed) {
+                kotlin.system.exitProcess(1)
+            }
+        }
+    }
+}
+
+@Command(
+    name = "watch",
+    description = ["Watch repository for file changes and incrementally update the index in the background."],
+)
+class WatchCommand : Runnable {
+    @Parameters(index = "0", description = ["Repository root directory"])
+    lateinit var root: Path
+
+    @picocli.CommandLine.Option(
+        names = ["--debounce-ms"],
+        description = ["Debounce duration in milliseconds (default: 300)"],
+    )
+    var debounceMs: Long = 300L
+
+    @picocli.CommandLine.Option(
+        names = ["--max-iterations"],
+        description = ["Maximum updates before exiting (default: infinite)"],
+    )
+    var maxIterations: Int = -1
+
+    @picocli.CommandLine.Option(
+        names = ["--timeout-ms"],
+        description = ["Maximum run duration in milliseconds before exiting (default: infinite)"],
+    )
+    var timeoutMs: Long = -1L
+
+    @picocli.CommandLine.Option(
+        names = ["--quiet"],
+        description = ["Suppress incremental update output"],
+    )
+    var quiet: Boolean = false
+
+    override fun run() {
+        val normalizedRoot = root.toAbsolutePath().normalize()
+        val dbPath = normalizedRoot.resolve(".repomind/index.db")
+        if (!java.nio.file.Files.exists(dbPath.parent)) {
+            java.nio.file.Files.createDirectories(dbPath.parent)
+        }
+        val indexer = IncrementalIndexer(dbPath)
+        System.err.println("RepoMind Watcher started on $normalizedRoot (press Ctrl+C to stop)...")
+
+        val watcher = dev.repomind.core.index.RepositoryWatcher(
+            repoRoot = normalizedRoot,
+            indexer = indexer,
+            debounceMs = debounceMs,
+            onUpdate = { result ->
+                if (!quiet) {
+                    println(Json.encodeToString(IncrementalResult.serializer(), result))
+                }
+            },
+        )
+
+        Runtime.getRuntime().addShutdownHook(Thread {
+            watcher.stop()
+        })
+
+        watcher.start(maxIterations, timeoutMs)
+    }
+}
+
+@Command(
+    name = "init",
+    description = ["Initialize .repomind directory and architecture rules configuration."],
+)
+class InitCommand : Runnable {
+    @Parameters(index = "0", description = ["Repository root directory"])
+    lateinit var root: Path
+
+    @picocli.CommandLine.Option(
+        names = ["--preset"],
+        description = ["Architecture preset: hexagonal, clean, three-tier (default: three-tier)"],
+    )
+    var presetName: String = "three-tier"
+
+    override fun run() {
+        val normalizedRoot = root.toAbsolutePath().normalize()
+        val repomindDir = normalizedRoot.resolve(".repomind")
+        java.nio.file.Files.createDirectories(repomindDir)
+
+        val preset = dev.repomind.core.rules.ArchitecturePreset.fromId(presetName)
+            ?: dev.repomind.core.rules.ArchitecturePreset.THREE_TIER
+
+        val dbPath = repomindDir.resolve("index.db")
+        val basePkg = if (java.nio.file.Files.isRegularFile(dbPath)) {
+            SymbolDatabase.open(dbPath).use { db ->
+                dev.repomind.core.rules.RuleGenerator.inferBasePackage(db.allTypes().map { it.qualifiedName })
+            }
+        } else null
+
+        val yaml = dev.repomind.core.rules.RuleGenerator.generateYaml(preset, basePkg)
+        val rulesFile = repomindDir.resolve("rules.yaml")
+        if (!java.nio.file.Files.exists(rulesFile)) {
+            java.nio.file.Files.writeString(rulesFile, yaml)
+            println("Initialized ${rulesFile} with preset '${preset.id}'")
+        } else {
+            System.err.println("NOTE: ${rulesFile} already exists; leaving unchanged.")
         }
     }
 }

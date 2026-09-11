@@ -73,4 +73,82 @@ class MultiLanguageParserTest {
         val pyParser = registry.forExtension("py")
         assertEquals(null, pyParser)
     }
+
+    @Test
+    fun `kotlin parser extracts extension functions and receiver edges`() {
+        val root = Files.createTempDirectory("kt-ext-repo")
+        val src = root.resolve("src/main/kotlin/com/example")
+        Files.createDirectories(src)
+
+        val ktFile = src.resolve("OrderExtensions.kt")
+        ktFile.writeText(
+            """
+            package com.example
+
+            import com.example.model.Order
+            import com.example.model.Price
+
+            fun Order.calculateTotal(taxRate: Price): Double {
+                return 100.0
+            }
+            """.trimIndent(),
+        )
+
+        val parser = KotlinSemanticParser()
+        val module = RepoModule(
+            name = "kt-mod",
+            path = root,
+            buildFile = null,
+            sourceRoots = listOf(SourceRoot(root.resolve("src/main/kotlin"), isTest = false)),
+        )
+
+        val parsed = parser.parseModule(module)
+        assertEquals(1, parsed.types.size)
+        val fileType = parsed.types.single()
+        assertEquals("com.example.OrderExtensionsKt", fileType.fqn)
+        assertTrue(fileType.methods.any { it.name == "calculateTotal" })
+
+        // Check USES edge from synthetic class to receiver type Order
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.USES && it.targetFqn == "com.example.model.Order" })
+        // Check USES edge to param Price
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.USES && it.targetFqn == "com.example.model.Price" })
+    }
+
+    @Test
+    fun `kotlin parser extracts companion objects and standalone objects`() {
+        val root = Files.createTempDirectory("kt-obj-repo")
+        val src = root.resolve("src/main/kotlin/com/example")
+        Files.createDirectories(src)
+
+        val ktFile = src.resolve("AppConfig.kt")
+        ktFile.writeText(
+            """
+            package com.example
+
+            object AppConfig {
+                val version: String = "1.0"
+            }
+
+            class Manager {
+                companion object {
+                    fun create(): Manager = Manager()
+                }
+            }
+            """.trimIndent(),
+        )
+
+        val parser = KotlinSemanticParser()
+        val module = RepoModule(
+            name = "kt-mod",
+            path = root,
+            buildFile = null,
+            sourceRoots = listOf(SourceRoot(root.resolve("src/main/kotlin"), isTest = false)),
+        )
+
+        val parsed = parser.parseModule(module)
+        val typeNames = parsed.types.map { it.fqn }
+        assertTrue(typeNames.contains("com.example.AppConfig"))
+        assertTrue(typeNames.contains("com.example.Manager"))
+        assertTrue(typeNames.contains("com.example.Companion"))
+    }
 }

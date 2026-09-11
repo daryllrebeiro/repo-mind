@@ -117,4 +117,105 @@ class ArchitectureRulesTest {
         assertEquals(1, report.violations.size)
         assertEquals(25, report.violations.single().line)
     }
+
+    @Test
+    fun `detects direct two-node package cycle`() {
+        val edges = listOf(
+            DependencyEdge("com.example.service.OrderService", "com.example.repo.OrderRepo", EdgeKind.CALLS, Confidence.CONFIRMED),
+            DependencyEdge("com.example.repo.OrderRepo", "com.example.service.OrderService", EdgeKind.USES, Confidence.CONFIRMED),
+        )
+
+        val detector = CycleDetector()
+        val report = detector.detectPackageCycles(edges)
+
+        assertTrue(report.hasCycles)
+        assertEquals(1, report.totalCycles)
+        val cycle = report.cycles.single()
+        assertEquals(listOf("com.example.repo", "com.example.service", "com.example.repo"), cycle.path)
+        assertTrue(cycle.sampleEdges.isNotEmpty())
+    }
+
+    @Test
+    fun `detects multi-hop package cycle`() {
+        val edges = listOf(
+            DependencyEdge("com.a.ClassA", "com.b.ClassB", EdgeKind.CALLS, Confidence.CONFIRMED),
+            DependencyEdge("com.b.ClassB", "com.c.ClassC", EdgeKind.CALLS, Confidence.CONFIRMED),
+            DependencyEdge("com.c.ClassC", "com.a.ClassA", EdgeKind.CALLS, Confidence.CONFIRMED),
+        )
+
+        val report = CycleDetector().detectPackageCycles(edges)
+        assertTrue(report.hasCycles)
+        assertEquals(1, report.totalCycles)
+        val cycle = report.cycles.single()
+        assertEquals(setOf("com.a", "com.b", "com.c"), cycle.path.toSet())
+    }
+
+    @Test
+    fun `reports acyclic package graph with zero cycles`() {
+        val edges = listOf(
+            DependencyEdge("com.a.ClassA", "com.b.ClassB", EdgeKind.CALLS, Confidence.CONFIRMED),
+            DependencyEdge("com.b.ClassB", "com.c.ClassC", EdgeKind.CALLS, Confidence.CONFIRMED),
+        )
+
+        val report = CycleDetector().detectPackageCycles(edges)
+        assertFalse(report.hasCycles)
+        assertTrue(report.cycles.isEmpty())
+    }
+
+    @Test
+    fun `evaluator integrates cycle detection when requested`() {
+        val types = listOf(
+            TypeStereotypeInfo("com.a.Service", emptyList()),
+            TypeStereotypeInfo("com.b.Dao", emptyList()),
+        )
+        val edges = listOf(
+            DependencyEdge("com.a.Service", "com.b.Dao", EdgeKind.CALLS, Confidence.CONFIRMED),
+            DependencyEdge("com.b.Dao", "com.a.Service", EdgeKind.CALLS, Confidence.CONFIRMED),
+        )
+
+        val evaluator = RuleEvaluator()
+        val report = evaluator.evaluate(emptyList(), types, edges, checkCycles = true)
+        assertFalse(report.passed)
+        assertTrue(report.violations.any { it.rule == "no-package-cycles" })
+    }
+
+    @Test
+    fun `generates and evaluates hexagonal architecture preset`() {
+        val rules = ArchitecturePreset.generateRules(ArchitecturePreset.HEXAGONAL, basePackage = "com.myapp")
+        assertEquals(3, rules.size)
+
+        val types = listOf(
+            TypeStereotypeInfo("com.myapp.domain.Order", emptyList()),
+            TypeStereotypeInfo("com.myapp.adapter.in.OrderController", emptyList()),
+        )
+        // Domain illegally depending on Inbound Adapter
+        val edges = listOf(
+            DependencyEdge("com.myapp.domain.Order", "com.myapp.adapter.in.OrderController", EdgeKind.USES, Confidence.CONFIRMED),
+        )
+
+        val report = RuleEvaluator().evaluate(rules, types, edges)
+        assertFalse(report.passed)
+        assertEquals("hexagonal-domain-isolation", report.violations.single().rule)
+    }
+
+    @Test
+    fun `rule generator infers common base package and outputs YAML`() {
+        val symbols = listOf(
+            "com.acme.banking.service.TransferService",
+            "com.acme.banking.repo.AccountRepo",
+            "com.acme.banking.controller.TransferController",
+        )
+
+        val inferred = RuleGenerator.inferBasePackage(symbols)
+        assertEquals("com.acme.banking", inferred)
+
+        val yaml = RuleGenerator.generateYaml(ArchitecturePreset.THREE_TIER, inferred)
+        assertTrue(yaml.contains("rules:"))
+        assertTrue(yaml.contains("three-tier-repo-isolation"))
+        assertTrue(yaml.contains("com.acme.banking"))
+
+        val parsedRules = RuleLoader.parse(yaml)
+        assertTrue(parsedRules.isNotEmpty())
+        assertEquals(3, parsedRules.size)
+    }
 }

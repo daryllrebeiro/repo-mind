@@ -28,4 +28,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.slf4j.api)
     implementation(libs.logback.classic)
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
+    testImplementation(kotlin("test"))
 }

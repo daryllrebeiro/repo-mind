@@ -9,6 +9,7 @@ class RuleEvaluator {
         types: List<TypeStereotypeInfo>,
         edges: List<DependencyEdge>,
         failOnViolation: Boolean = false,
+        checkCycles: Boolean = false,
     ): RulesReport {
         val byFqn = types.associateBy { it.fqn }
 
@@ -40,10 +41,29 @@ class RuleEvaluator {
             }
         }
 
+        val cycleReport = if (checkCycles || rules.any { it.name.contains("cycle", ignoreCase = true) }) {
+            val detector = CycleDetector()
+            val rep = detector.detectPackageCycles(edges)
+            for (cycle in rep.cycles) {
+                violations += Violation(
+                    rule = "no-package-cycles",
+                    message = "Circular package dependency detected: ${cycle.path.joinToString(" -> ")}",
+                    sourceFqn = cycle.path.first(),
+                    targetFqn = cycle.path.getOrNull(1) ?: cycle.path.last(),
+                    edgeKind = "CYCLE",
+                    line = 0,
+                )
+            }
+            rep
+        } else {
+            null
+        }
+
         val report = RulesReport(
             evaluatedRules = evaluated,
             violations = violations.distinctBy { Triple(it.rule, it.sourceFqn, it.targetFqn) },
             checkedTypes = types.size,
+            cycleReport = cycleReport,
         )
 
         if (failOnViolation && report.violations.isNotEmpty()) {

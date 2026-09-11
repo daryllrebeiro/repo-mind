@@ -43,8 +43,9 @@ data class RulesReport(
     val evaluatedRules: Int,
     val violations: List<Violation>,
     val checkedTypes: Int,
+    val cycleReport: CycleReport? = null,
 ) {
-    val passed: Boolean get() = violations.isEmpty()
+    val passed: Boolean get() = violations.isEmpty() && (cycleReport == null || !cycleReport.hasCycles)
 
     fun violationsBy(symbolFqn: String): List<Violation> =
         violations.filter { it.sourceFqn.substringBefore('#') == symbolFqn }
