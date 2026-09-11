@@ -11,7 +11,11 @@ import dev.repomind.storage.sqlite.SymbolDatabase
 import java.nio.file.Files
 import java.nio.file.Path
 
-class RepoQueryEngine(private val dbPath: Path, private val defaultLimit: Int = 20) : AutoCloseable {
+class RepoQueryEngine(
+    private val dbPath: Path,
+    private val defaultLimit: Int = 20,
+    readOnly: Boolean = true,
+) : AutoCloseable {
 
     private val db: SymbolDatabase
     private val graph: GraphStore
@@ -20,7 +24,7 @@ class RepoQueryEngine(private val dbPath: Path, private val defaultLimit: Int = 
         if (!Files.isRegularFile(dbPath)) {
             throw QueryEngineException("no index at $dbPath — run 'repomind index <repo>' first")
         }
-        db = SymbolDatabase.open(dbPath)
+        db = SymbolDatabase.open(dbPath, readOnly = readOnly)
         graph = db.graphStore
     }
 
@@ -115,20 +119,24 @@ class RepoQueryEngine(private val dbPath: Path, private val defaultLimit: Int = 
         return dev.repomind.core.rules.RuleEvaluator().evaluate(rules, types, edges)
     }
 
-    fun dependencyGraph(scope: String? = null, limit: Int = defaultLimit): DependencyGraphResult {
+    fun dependencyGraph(scope: String? = null, limit: Int = defaultLimit, cursor: String? = null): DependencyGraphResult {
         val allEdges = db.edges.findAll()
-        val filteredEdges = if (scope.isNullOrBlank()) {
-            allEdges.take(limit)
+        val matchingEdges = if (scope.isNullOrBlank()) {
+            allEdges
         } else {
-            allEdges.filter { it.sourceFqn.startsWith(scope) || it.targetFqn.startsWith(scope) }.take(limit)
+            allEdges.filter { it.sourceFqn.startsWith(scope) || it.targetFqn.startsWith(scope) }
         }
-        val nodeIds = (filteredEdges.map { it.sourceFqn.substringBefore('#') } + filteredEdges.map { it.targetFqn.substringBefore('#') }).distinct().sorted()
+        val offset = cursor?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+        val pagedEdges = matchingEdges.drop(offset).take(limit)
+        val nextCursor = if (offset + limit < matchingEdges.size) (offset + limit).toString() else null
+        val nodeIds = (pagedEdges.map { it.sourceFqn.substringBefore('#') } + pagedEdges.map { it.targetFqn.substringBefore('#') }).distinct().sorted()
         return DependencyGraphResult(
             scope = scope,
             nodes = nodeIds.map { DependencyGraphNode(it) },
-            edges = filteredEdges.map { DependencyGraphEdge(it.sourceFqn, it.targetFqn, it.kind, it.confidence) },
+            edges = pagedEdges.map { DependencyGraphEdge(it.sourceFqn, it.targetFqn, it.kind, it.confidence) },
             totalNodes = nodeIds.size,
-            totalEdges = filteredEdges.size,
+            totalEdges = matchingEdges.size,
+            nextCursor = nextCursor,
         )
     }
 

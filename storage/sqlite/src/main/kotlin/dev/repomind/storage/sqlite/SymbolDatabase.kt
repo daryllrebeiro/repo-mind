@@ -32,13 +32,17 @@ data class ConfidenceReport(
     val confidenceRate: Double,
 )
 
-class SymbolDatabase private constructor(private val connection: Connection) : AutoCloseable {
+class SymbolDatabase private constructor(
+    private val connection: Connection,
+    val readOnly: Boolean = false,
+) : AutoCloseable {
 
     val edges: EdgeRepository = EdgeRepository(connection)
     val graphStore: dev.repomind.core.graph.GraphStore get() = edges
 
     init {
-        connection.createStatement().use { stmt ->
+        if (!readOnly) {
+            connection.createStatement().use { stmt ->
             stmt.executeUpdate(
                 """
                 CREATE TABLE IF NOT EXISTS modules (
@@ -116,6 +120,7 @@ class SymbolDatabase private constructor(private val connection: Connection) : A
         }
         edges.init()
     }
+}
 
     fun recordModule(name: String, path: String, buildSystem: String = "UNKNOWN") {
         connection.prepareStatement("INSERT OR REPLACE INTO modules (name, path, build_system) VALUES (?, ?, ?)").use { ps ->
@@ -423,12 +428,24 @@ class SymbolDatabase private constructor(private val connection: Connection) : A
     }
 
     companion object {
-        fun open(dbPath: Path): SymbolDatabase {
-            Files.createDirectories(dbPath.toAbsolutePath().parent)
+        fun open(dbPath: Path, readOnly: Boolean = false): SymbolDatabase {
+            if (!readOnly) {
+                Files.createDirectories(dbPath.toAbsolutePath().parent)
+            }
             Class.forName("org.sqlite.JDBC")
-            val conn = DriverManager.getConnection("jdbc:sqlite:${dbPath.toAbsolutePath()}")
-            conn.createStatement().use { it.execute("PRAGMA journal_mode=WAL") }
-            return SymbolDatabase(conn)
+            val config = org.sqlite.SQLiteConfig()
+            if (readOnly) {
+                config.setReadOnly(true)
+            }
+            val conn = config.createConnection("jdbc:sqlite:${dbPath.toAbsolutePath()}")
+            conn.createStatement().use { stmt ->
+                if (readOnly) {
+                    stmt.execute("PRAGMA query_only = ON;")
+                } else {
+                    stmt.execute("PRAGMA journal_mode=WAL;")
+                }
+            }
+            return SymbolDatabase(conn, readOnly)
         }
     }
 }

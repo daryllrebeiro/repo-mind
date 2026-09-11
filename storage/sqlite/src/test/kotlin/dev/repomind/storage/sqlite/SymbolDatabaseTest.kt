@@ -88,4 +88,22 @@ class SymbolDatabaseTest {
             assertTrue(elapsedMs < 50, "avg lookup took ${elapsedMs}ms, budget is 50ms")
         }
     }
+
+    @Test
+    fun `read-only mode allows queries but prevents writes`() {
+        val dbPath = Files.createTempDirectory("repomind-db").resolve("index.db")
+        SymbolDatabase.open(dbPath).use { db ->
+            db.replaceModule("m1", parseOf(listOf(type("com.example.ReadTest"))))
+        }
+
+        SymbolDatabase.open(dbPath, readOnly = true).use { roDb ->
+            assertTrue(roDb.readOnly)
+            val rows = roDb.findByFqn("com.example.ReadTest")
+            assertEquals(1, rows.size)
+
+            org.junit.jupiter.api.assertThrows<java.sql.SQLException> {
+                roDb.recordModule("illegal", "/path")
+            }
+        }
+    }
 }

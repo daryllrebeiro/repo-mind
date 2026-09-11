@@ -81,6 +81,7 @@ data class DependencyGraphResult(
     val edges: List<DependencyGraphEdge>,
     val totalNodes: Int,
     val totalEdges: Int,
+    val nextCursor: String? = null,
 )
 
 class QueryEngineException(message: String) : RuntimeException(message)

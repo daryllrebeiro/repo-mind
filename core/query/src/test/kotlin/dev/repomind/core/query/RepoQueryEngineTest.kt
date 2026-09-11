@@ -91,5 +91,17 @@ class RepoQueryEngineTest {
             assertTrue(e.message!!.contains("no index"), "unexpected message: ${e.message}")
         }
     }
-}
 
+    @Test
+    fun `dependency graph pagination returns paged edges and next cursor`() {
+        RepoQueryEngine(buildIndexedRepo().resolve(".repomind/index.db")).use { engine ->
+            val firstPage = engine.dependencyGraph(limit = 1)
+            assertEquals(1, firstPage.edges.size)
+            if (firstPage.totalEdges > 1) {
+                assertEquals("1", firstPage.nextCursor)
+                val secondPage = engine.dependencyGraph(limit = 1, cursor = firstPage.nextCursor)
+                assertEquals(1, secondPage.edges.size)
+            }
+        }
+    }
+}

@@ -99,8 +99,9 @@ class PerformanceBenchmarkTest {
         RepoQueryEngine(dbPath).use { engine ->
             // Warmup
             engine.findCallers("com.perf.Component1", 20)
+            engine.impact("com.perf.Component1")
 
-            // Measure
+            // Measure findCallers
             val startTime = System.nanoTime()
             val callers = engine.findCallers("com.perf.Component1", 20)
             val queryMs = (System.nanoTime() - startTime) / 1_000_000
@@ -109,7 +110,7 @@ class PerformanceBenchmarkTest {
             assertTrue(callers.items.isNotEmpty())
             assertTrue(queryMs < 50, "Graph query latency was ${queryMs}ms, budget is 50ms")
 
-            // Impact query latency
+            // Measure impact query latency
             val impactStart = System.nanoTime()
             val impact = engine.impact("com.perf.Component1")
             val impactMs = (System.nanoTime() - impactStart) / 1_000_000

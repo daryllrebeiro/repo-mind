@@ -88,4 +88,21 @@ class ClasspathResolverTest {
             resolver.resolve(module.path, module, BuildSystem.UNKNOWN)
         }
     }
+
+    @Test
+    fun `resolveSafely returns structured error diagnostics instead of throwing`() {
+        val (_, _, module) = tempModule()
+        val runner = CommandRunner { _, _ -> CommandResult(1, "", "[ERROR] Network unreachable: cannot fetch dependencies") }
+        val resolver = ClasspathResolver(cache = FileBasedClasspathCache(Files.createTempDirectory("cp-cache")), commandRunner = runner)
+
+        val result = resolver.resolveSafely(module.path, module, BuildSystem.MAVEN)
+        assertFalse(result.isSuccess)
+        assertTrue(result.entries.isEmpty())
+        assertEquals(1, result.diagnostics.size)
+        val diag = result.diagnostics.single()
+        assertEquals(DiagnosticSeverity.ERROR, diag.severity)
+        assertEquals(1, diag.exitCode)
+        assertTrue(diag.message.contains("Maven classpath resolution failed"))
+        assertTrue(diag.details.orEmpty().contains("Network unreachable"))
+    }
 }

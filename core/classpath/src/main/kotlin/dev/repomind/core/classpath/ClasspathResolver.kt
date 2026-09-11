@@ -33,6 +33,13 @@ class ClasspathResolver(
                     module = module.path,
                     entries = cached.entries.map(Path::of),
                     fromCache = true,
+                    diagnostics = listOf(
+                        ClasspathDiagnostic(
+                            severity = DiagnosticSeverity.INFO,
+                            message = "Loaded ${cached.entries.size} classpath entries from cache for module: ${module.name}",
+                        ),
+                    ),
+                    isSuccess = true,
                 )
             }
         }
@@ -53,7 +60,51 @@ class ClasspathResolver(
             module = module.path,
             entries = entries.map(Path::of),
             fromCache = false,
+            diagnostics = listOf(
+                ClasspathDiagnostic(
+                    severity = DiagnosticSeverity.INFO,
+                    message = "Resolved ${entries.size} fresh classpath entries for module: ${module.name}",
+                ),
+            ),
+            isSuccess = true,
         )
+    }
+
+    fun resolveSafely(repoRoot: Path, module: RepoModule, buildSystem: BuildSystem): ResolvedClasspath {
+        return try {
+            resolve(repoRoot, module, buildSystem)
+        } catch (e: ClasspathResolutionException) {
+            logger.warn("Classpath resolution error for ${module.name}: ${e.message}")
+            ResolvedClasspath(
+                module = module.path,
+                entries = emptyList(),
+                fromCache = false,
+                diagnostics = listOf(
+                    ClasspathDiagnostic(
+                        severity = DiagnosticSeverity.ERROR,
+                        message = e.message ?: "Classpath resolution failed",
+                        details = e.stderr,
+                        exitCode = e.exitCode,
+                    ),
+                ),
+                isSuccess = false,
+            )
+        } catch (e: Exception) {
+            logger.warn("Unexpected error resolving classpath for ${module.name}: ${e.message}")
+            ResolvedClasspath(
+                module = module.path,
+                entries = emptyList(),
+                fromCache = false,
+                diagnostics = listOf(
+                    ClasspathDiagnostic(
+                        severity = DiagnosticSeverity.ERROR,
+                        message = e.message ?: e.javaClass.simpleName,
+                        details = e.stackTraceToString(),
+                    ),
+                ),
+                isSuccess = false,
+            )
+        }
     }
 
     private fun resolveMaven(module: RepoModule, pomFile: Path): List<String> {
@@ -76,6 +127,7 @@ class ClasspathResolver(
                     moduleName = module.name,
                     message = "Maven classpath resolution failed for ${module.name} (exit ${result.exitCode})",
                     stderr = result.stderr.ifBlank { result.stdout },
+                    exitCode = result.exitCode,
                 )
             }
             if (!Files.isRegularFile(outputFile)) {
@@ -135,6 +187,7 @@ class ClasspathResolver(
                     moduleName = module.name,
                     message = "Gradle classpath resolution failed for ${module.name} (exit ${result.exitCode})",
                     stderr = result.stderr.ifBlank { result.stdout },
+                    exitCode = result.exitCode,
                 )
             }
             val between = extractBetween(result.stdout, "__CP_BEGIN__", "__CP_END__")

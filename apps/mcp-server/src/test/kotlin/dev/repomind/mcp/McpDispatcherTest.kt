@@ -135,4 +135,15 @@ class McpDispatcherTest {
 
         assertTrue(response.contains("isError\\\":true") || response.contains("error"))
     }
+
+    @Test
+    fun `get_dependency_graph supports pagination with cursor and limit`() {
+        val repo = buildIndexedRepo().toString().replace('\\', '/')
+        val response = dispatcher.handle(
+            """{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"get_dependency_graph","arguments":{"repoPath":"$repo","limit":"1","cursor":"0"}}}""",
+        )!!
+
+        assertTrue(response.contains("nodes"), response)
+        assertTrue(response.contains("totalEdges"), response)
+    }
 }

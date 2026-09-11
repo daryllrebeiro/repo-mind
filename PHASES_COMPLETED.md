@@ -127,6 +127,14 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
 ---
 
 ### Roadmap Phase 1: Stabilization & Core Engine Hardening
+
+#### Task 1.1: Schema Deduplication & GraphStore Unification
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `core:graph`: Unified graph access behind `GraphStore` interface implemented by both `InMemoryGraph` and `SqliteGraphStore`.
+  - `storage:sqlite`: Consolidated persistence on `graph_edges` table with indexes on target, source, module, and file paths. Deprecated redundant legacy `edges` and `symbol_references` tables with automated schema migration.
+  - Foreign key enforcement enabled via `PRAGMA foreign_keys = ON;`.
+
 #### Task 1.2: Multi-Core Parallel AST Parsing Engine
 - **Date Completed**: September 11, 2026
 - **Key Changes**:
@@ -139,5 +147,30 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
   - `ConcurrentParsingTest.kt`:
     - Added race detector test suite asserting identical FQN, edge, and unresolved symbol output between single-threaded and concurrent runs.
     - Verified synchronous SPI delegation.
+
+#### Task 1.3: Classpath Diagnostics & Robust Logging
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `Models.kt` in `core:classpath`:
+    - Introduced `ClasspathDiagnostic` and `DiagnosticSeverity` (`INFO`, `WARNING`, `ERROR`) data structures with exit codes and error details.
+    - Extended `ResolvedClasspath` with `diagnostics` and `isSuccess` status flags.
+  - `ClasspathResolver.kt`:
+    - Implemented `resolveSafely(repoRoot, module, buildSystem)` capturing external build tool failures, exit codes, and stderr without throwing unhandled exceptions.
+    - Attached structured diagnostic metadata for both cache hits and fresh tool executions.
+  - `ClasspathResolverTest.kt`:
+    - Added test suite verifying `resolveSafely` structured diagnostic capture on build-tool exit failures.
+
+#### Task 1.4: MCP Output Pagination & Read-Only Safety
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `SymbolDatabase.kt`:
+    - Supported `readOnly: Boolean = false` mode opening connections with `SQLiteConfig.setReadOnly(true)` and `PRAGMA query_only = ON;`.
+    - Protected read-only database connections from executing write/DDL statements during startup.
+  - `RepoQueryEngine.kt`:
+    - Defaulted database connections to `readOnly = true` to protect index integrity against modifications by AI agents.
+    - Added pagination support with `cursor` and `limit` to `dependencyGraph`, returning `nextCursor` tokens and total edge counts.
+  - `McpDispatcher.kt`:
+    - Exposed `cursor` parameter in MCP tool schema for `get_dependency_graph`.
   - Full project test suite and static analysis (`./gradlew test detekt ktlintCheck`) fully passing (86 actionable tasks, 0 failures).
+
 

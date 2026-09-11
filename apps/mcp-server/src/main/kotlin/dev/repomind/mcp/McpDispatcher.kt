@@ -156,11 +156,12 @@ class McpDispatcher(private val serverName: String = "repomind", private val ser
             ))
             add(toolDef(
                 name = "get_dependency_graph",
-                description = "Retrieve nodes and dependency edges for a package/module scope or full repository.",
+                description = "Retrieve nodes and dependency edges for a package/module scope or full repository with pagination.",
                 props = mapOf(
                     "repoPath" to "Absolute path to the analyzed repository root",
                     "scope" to "(optional) package or module prefix filter",
                     "limit" to "(optional) max edges, default 50",
+                    "cursor" to "(optional) offset cursor for next page of edges",
                 ),
                 required = listOf("repoPath"),
             ))
@@ -223,7 +224,8 @@ class McpDispatcher(private val serverName: String = "repomind", private val ser
                     "get_dependency_graph" -> {
                         val scope = (args["scope"] as? kotlinx.serialization.json.JsonPrimitive)?.content
                         val limit = (args["limit"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 50
-                        json.encodeToString(DependencyGraphResult.serializer(), engine.dependencyGraph(scope, limit))
+                        val cursor = (args["cursor"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                        json.encodeToString(DependencyGraphResult.serializer(), engine.dependencyGraph(scope, limit, cursor))
                     }
                     else -> return textResult("""{"error":"unknown tool: $name"}""", isError = true)
                 }
