@@ -183,4 +183,30 @@ class CliCommandsTest {
         assertFalse(modified.contains("deadMethod"), "Applied refactoring must remove dead method")
         assertTrue(modified.contains("public String run()"), "Active method must be preserved")
     }
+
+    @Test
+    fun `federate command links multiple microservices and generates report`() {
+        val rootA = createSampleProject()
+        val rootB = Files.createTempDirectory("cli-client-repo")
+        rootB.resolve("pom.xml").writeText(
+            """
+            <project>
+              <modelVersion>4.0.0</modelVersion>
+              <groupId>com.sample</groupId>
+              <artifactId>client-service</artifactId>
+              <version>1.0.0</version>
+            </project>
+            """.trimIndent(),
+        )
+        IncrementalIndexer(rootA.resolve(".repomind/index.db")).update(rootA)
+        IncrementalIndexer(rootB.resolve(".repomind/index.db")).update(rootB)
+
+        val cmd = CommandLine(RepomindCli())
+        val outReport = rootA.resolve("reports/federation.md")
+        val exitCode = cmd.execute("federate", rootA.toString(), rootB.toString(), "--output=" + outReport.toString())
+        assertEquals(0, exitCode)
+        assertTrue(Files.isRegularFile(outReport))
+        val reportContent = Files.readString(outReport)
+        assertTrue(reportContent.contains("RepoMind Enterprise Polyrepo Federation Report"))
+    }
 }

@@ -58,6 +58,7 @@ import kotlin.system.exitProcess
         LspCommand::class,
         DeprecationsCommand::class,
         RefactorCommand::class,
+        FederateCommand::class,
     ],
 )
 class RepomindCli : Runnable {
@@ -904,6 +905,55 @@ class RefactorCommand : Runnable {
 
             if (createPr) {
                 println("gh pr create --title \"refactor: automated architectural refactoring via RepoMind\" --body \"Applied ${result.totalTransformations} transformation(s) across ${result.totalFilesChanged} file(s).\"")
+            }
+        }
+    }
+}
+
+@Command(
+    name = "federate",
+    description = ["Federate multiple repositories to detect cross-repo API dependencies and blast radius (Feign/REST)."],
+)
+class FederateCommand : Runnable {
+    @Parameters(
+        arity = "1..*",
+        description = ["Paths to repository root directories to federate"],
+    )
+    var repos: List<Path> = emptyList()
+
+    @picocli.CommandLine.Option(
+        names = ["--output", "-o"],
+        description = ["Output Markdown report file path (default: stdout)"],
+    )
+    var outputFile: Path? = null
+
+    @picocli.CommandLine.Option(
+        names = ["--json"],
+        description = ["Output federation report as JSON"],
+    )
+    var json: Boolean = false
+
+    override fun run() {
+        val validRoots = repos.map { dev.repomind.core.model.PathGuard.requireDirectory(it) }
+        val engine = dev.repomind.core.index.PolyrepoFederationEngine()
+        val report = engine.federate(validRoots)
+
+        if (json) {
+            val jsonStr = Json.encodeToString(
+                dev.repomind.core.index.FederationReport.serializer(),
+                report,
+            )
+            println(jsonStr)
+        } else {
+            val markdown = report.toMarkdown()
+            if (outputFile != null) {
+                if (outputFile!!.parent != null) {
+                    java.nio.file.Files.createDirectories(outputFile!!.parent)
+                }
+                java.nio.file.Files.writeString(outputFile!!, markdown)
+                System.err.println("Federation report written to $outputFile")
+            } else {
+                println(markdown)
             }
         }
     }

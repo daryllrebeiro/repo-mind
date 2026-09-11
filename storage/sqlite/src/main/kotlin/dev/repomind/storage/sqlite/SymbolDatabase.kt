@@ -397,6 +397,9 @@ class SymbolDatabase private constructor(
         )
     }
 
+    fun findByParentFqn(parentFqn: String): List<SymbolRow> =
+        query("SELECT $COLUMNS FROM symbols WHERE parent_fqn = ? ORDER BY line_start", parentFqn)
+
     fun allTypes(): List<SymbolRow> =
         query("SELECT $COLUMNS FROM symbols WHERE kind NOT IN ('METHOD', 'FIELD') ORDER BY qualified_name")
 

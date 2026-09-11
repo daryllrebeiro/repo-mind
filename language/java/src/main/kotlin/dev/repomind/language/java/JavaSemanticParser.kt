@@ -620,7 +620,11 @@ class JavaSemanticParser : LanguageParser {
             interfaceNames = emptyList()
         }
 
-        val annotations = typeDecl.annotations.map { it.nameAsString.substringAfterLast('.') }
+        val annotations = typeDecl.annotations.flatMap { ann ->
+            val name = ann.nameAsString.substringAfterLast('.')
+            val raw = ann.toString().replace("\n", " ").trim()
+            if (raw.contains('(')) listOf(name, raw.replace(',', ';')) else listOf(name)
+        }
         val configPrefix = typeDecl.annotations
             .filter { it.nameAsString.substringAfterLast('.') == "ConfigurationProperties" }
             .firstNotNullOfOrNull { annotationValue(it, setOf("prefix", "value")) }
@@ -633,7 +637,11 @@ class JavaSemanticParser : LanguageParser {
                     isStatic = m.isStatic,
                     isAbstract = m.isAbstract,
                     line = m.range.map { it.begin.line }.orElse(0),
-                    annotations = m.annotations.map { it.nameAsString.substringAfterLast('.') },
+                    annotations = m.annotations.flatMap { ann ->
+                        val name = ann.nameAsString.substringAfterLast('.')
+                        val raw = ann.toString().replace("\n", " ").trim()
+                        if (raw.contains('(')) listOf(name, raw.replace(',', ';')) else listOf(name)
+                    },
                     returnType = try { m.type.asString() } catch (_: Exception) { null },
                 )
             })
