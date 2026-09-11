@@ -2,43 +2,44 @@
 
 **Author**: Principal Software Architect & Staff Systems Engineer  
 **Date**: September 2026  
-**Target System**: RepoMind (JVM/Kotlin Code Intelligence & Architecture Engine)  
-**Status**: Approved for Engineering Distribution  
+**Target System**: RepoMind (JVM/Kotlin Codebase Intelligence & Architecture Engine)  
+**Maturity Stage**: Production Enterprise Scaling (Post-Phase 3 Milestone)  
+**Repository Scope**: 15 Gradle Submodules, Kotlin 2.1.x, Java 8–21 LTS, SQLite 3.48+  
 
 ---
 
 ## 1. Executive Summary & Health Assessment
 
-RepoMind is a high-throughput, deterministic code intelligence, semantic dependency analysis, and architectural governance platform designed for large-scale JVM codebases (Java 8–21, Kotlin, Spring Framework). It extracts method-level call graphs, computes transitive impact blast radii, evaluates architectural boundary rules, integrates with IDEs via the Model Context Protocol (MCP) and VS Code Language Extensions, and persists knowledge in a local, single-file SQLite database.
+RepoMind is an offline-first, high-throughput code intelligence, semantic dependency analysis, and architectural governance platform tailored for modern enterprise JVM ecosystems (Java, Kotlin, Spring Framework). It extracts method-level call graphs, computes transitive blast radii via in-database recursive common table expressions (CTEs), enforces custom and preset architectural boundaries (`HEXAGONAL`, `CLEAN`, `THREE_TIER`), exposes native IDE integration via the Language Server Protocol (LSP) and AI agent tooling via the Model Context Protocol (MCP), performs automated AST refactoring, and federates cross-repository microservice contracts across Spring REST and OpenFeign boundaries.
 
 ### Overall System Maturity Scorecard
 
 | Dimension | Grade | Assessment |
 |---|:---:|---|
-| **Architecture & Modularity** | **A-** | Clear 15-module Gradle DAG. Strong separation of concern between ingestion, semantic parsing, graph traversal, and persistence. SPI abstraction recently added for multi-language extensibility. |
-| **Code Quality & Typing** | **A** | Idiomatic Kotlin 2.x, strict null safety, immutable data classes (`CodeModel`, `ImpactModel`, `RuleModel`), zero circular module dependencies. Enforced by detekt and ktlint. |
-| **Maintainability** | **B+** | Clean separation of business logic from framework bindings. AST visitors in `JavaSemanticParser` and `KotlinSemanticParser` are large and need visitor decomposition before adding more language features. |
-| **Performance & Scalability** | **B+** | Sub-second incremental indexing (<1s for single-file diffs in 120+ file projects). SQLite batch transactions and indexed lookups are fast (<50ms for caller queries), but large monolithic codebases (>10,000 files) will require parallel AST worker pools and streaming graph algorithms. |
-| **Test Coverage & Validation** | **A** | 86 actionable Gradle test tasks passing across all 15 modules. Real-world end-to-end integration fixtures (`spring-petclinic`, `piggymetrics`, `gs-rest-service`). Quality-gated eval harness enforcing `Precision >= 0.85` and `Recall >= 0.90`. |
+| **Architecture & Modularity** | **A** | Strict 15-module unidirectional Gradle DAG. Complete isolation between AST ingestion, semantic graph modeling, rule evaluation, and persistence. Unified `GraphStore` SPI successfully unifies in-memory graph traversals with SQLite recursive CTEs. |
+| **Code Quality & Typing** | **A** | Idiomatic Kotlin 2.x across all modules. Exhaustive null safety, immutable data transfer classes (`CodeModel`, `ImpactModel`, `RuleModel`, `PolyrepoFederation`), zero compiler warnings, and full detekt/ktlint static enforcement. |
+| **Maintainability** | **A-** | Excellent separation between domain logic and presentation layers. AST rewriting (`AstRefactoringEngine`) preserves original formatting. The monolithic visitor blocks in `JavaSemanticParser` and regex state machine in `KotlinSemanticParser` should transition to Kotlin Analysis API (FIR/K2) for full language parity. |
+| **Performance & Scalability** | **A-** | In-database SQLite CTE queries resolve 10,000+ transitive edges in $<50\text{ms}$. Multi-core coroutine AST pool saturates CPU cores during initial ingestion. Incremental indexing delivers single-file turnarounds in $<350\text{ms}$. Future bottleneck: monorepos exceeding 100,000 files will require partitioned SQLite databases or embedded key-value metadata caches. |
+| **Test Coverage & Quality Assurance** | **A** | 89 test tasks passing across all 15 Gradle modules with 100% success rate. Real-world end-to-end verification against Spring PetClinic, PiggyMetrics, and GS REST Service. Quality gate enforces ground-truth precision $\ge 0.85$ and recall $\ge 0.90$. |
 
 ### Architectural Philosophy
 
 #### Core Strengths
-1. **Deterministic, Offline-First Analysis**: Runs completely locally without external cloud dependencies, protecting proprietary intellectual property while eliminating API latency and rate limits.
-2. **True Semantic Resolution with Disambiguation**: JavaParser combined with custom reflection detection and Spring-aware `@Qualifier` / `@Named` injection disambiguation gives RepoMind higher edge fidelity than regex or ctags-based tools.
-3. **Structured Confidence Attribution**: Distinguishes `Confidence.CONFIRMED` from `Confidence.POSSIBLE` (polymorphic dispatches, reflection, unresolved symbols), preventing AI agents and human architects from mistaking heuristic guesses for verified call paths.
-4. **Clean Decoupled Presentation Layer**: The Model Context Protocol (MCP) server operates strictly over stdio with stderr logging isolation, providing AI agents (Cursor, Claude Desktop, Antigravity) with structured, token-capped JSON tools.
+1. **Offline-First, Zero-Telemetry Privacy**: Static analysis and graph persistence operate 100% locally on developer machines or isolated CI runners. Zero source code or metadata leaves the host perimeter.
+2. **Dual-Surface Interface (LSP + MCP)**: Bridges human developer workflows (real-time diagnostics, CodeLens caller counts, hover edge provenance in VS Code) and autonomous AI agent workflows (stdio-isolated JSON toolsets for Cursor, Claude Desktop, Antigravity) from a unified underlying index.
+3. **In-Database Recursive CTE Traversal**: Replaces memory-heavy iterative BFS/DFS loops in the JVM with SQLite native `WITH RECURSIVE` queries over indexed B-Trees, bounding memory utilization to $O(1)$ relative to total graph size.
+4. **Disambiguated Semantic Edge Precision**: Resolves interface dispatches via Spring `@Qualifier` / `@Named` bean matching, identifies reflection invocations (`Method.invoke`, `Class.forName`), excludes test mocks (`@MockBean`, `@SpyBean`), and attributes structured confidence ratings (`CONFIRMED` vs. `POSSIBLE`).
 
 #### Fundamental Structural Risks
-1. **Single-Threaded In-Memory AST Traversal**: `JavaSemanticParser` processes files sequentially within each module. While SQLite batching is optimized, AST construction on multi-million line monorepos will bottleneck CPU cores without worker parallelism.
-2. **SQLite Write Contention on Concurrent Workflows**: SQLite in WAL mode allows concurrent readers, but parallel module indexers competing for the single database lock will encounter `SQLITE_BUSY` unless managed by a single-writer actor or connection pool queue.
-3. **Heuristic Kotlin Parsing vs. Compiler Frontend**: `KotlinSemanticParser` currently uses regex-based lexing/parsing rather than the official Kotlin Analysis API (FIR / K2). While fast and lightweight, it cannot resolve complex type inference, extensions, or higher-order lambda dispatch with the same depth as the Java symbol solver.
+1. **Kotlin Regex Parsing vs. Compiler Frontend**: While `KotlinSemanticParser` successfully extracts extension functions, companion objects, and top-level functions, complex multi-file type inferences and generic variance cannot match JavaParser's symbol solver without adopting Kotlin's official Analysis API (FIR/K2).
+2. **Single SQLite Database Write Lock**: Although SQLite runs in WAL mode with concurrent readers, multi-threaded indexers writing simultaneously to `.repomind/index.db` must serialize transactions. High-frequency parallel monorepo ingestion requires coordinated single-writer channels.
+3. **Ephemeral Socket Lifecycle on Non-POSIX Platforms**: The local daemon watcher uses Java NIO `WatchService` and Unix/TCP domain sockets. On Windows environments with locked files or non-graceful terminal termination, orphan `.repomind/daemon.pid` files require robust stale-PID eviction.
 
 ### Primary Bottlenecks Hindering Scaling
 
-1. **Sequential AST Parsing**: Analysis throughput is bound to a single CPU thread during initial repository scans.
-2. **In-Memory Transitive Graph Materialization**: `InMemoryGraph` builds full adjacency lists in memory for queries; codebases with >500,000 edges risk high JVM heap pressure during deep BFS/DFS blast radius calculations.
-3. **Heuristic Kotlin Type Resolution**: Inability to deeply resolve cross-file Kotlin type inferences without a full compiler Analysis API backend.
+1. **Kotlin Compiler Symbol Resolution**: Lack of full symbol solving in Kotlin requires heuristic type inference for overloaded methods.
+2. **Monorepo Memory-Mapped Indexing**: Repositories exceeding 50,000 Java/Kotlin classes stress single-file SQLite index cache pages during full cold scans.
+3. **Cross-Service Schema Sharing**: Polyrepo federation currently requires local disk access to sibling repository checkouts. Distributed enterprise teams require remote index synchronization.
 
 ---
 
@@ -46,83 +47,133 @@ RepoMind is a high-throughput, deterministic code intelligence, semantic depende
 
 ### 2.1 Design Patterns & Modularity
 
-The project adheres to a unidirectional Directed Acyclic Graph (DAG) across its 15 Gradle submodules:
+The RepoMind codebase implements a unidirectional Directed Acyclic Graph across 15 submodules:
 
 ```mermaid
 graph TD
     CLI[apps:cli] --> CoreQuery[core:query]
     CLI --> CoreReport[core:report]
     CLI --> CoreIndex[core:index]
+    CLI --> CoreRules[core:rules]
+    CLI --> CoreImpact[core:impact]
     MCP[apps:mcp-server] --> CoreQuery
-    MCP --> CoreImpact[core:impact]
-    MCP --> CoreRules[core:rules]
+    MCP --> CoreImpact
+    MCP --> CoreRules
     CoreIndex --> CoreScanner[core:scanner]
     CoreIndex --> LanguageJava[language:java]
     CoreIndex --> CoreClasspath[core:classpath]
     CoreIndex --> StorageSqlite[storage:sqlite]
     LanguageJava --> CoreModel[core:model]
     LanguageJava --> CoreJdk[core:jdk]
-    CoreQuery --> StorageSqlite
-    CoreImpact --> CoreGraph[core:graph]
+    CoreRules --> StorageSqlite
     CoreRules --> CoreModel
+    CoreImpact --> CoreGraph[core:graph]
+    CoreImpact --> StorageSqlite
     StorageSqlite --> CoreModel
+    StorageSqlite --> CoreGraph
+    CoreQuery --> StorageSqlite
 ```
 
-#### Observations & Boundaries
-- **SPI Pattern (`LanguageParser`)**: The recent introduction of `LanguageParser` and `ParserRegistry` in `core:model` provides a clean service provider boundary. Any parser implementing `languageId`, `supportedExtensions`, and `parseModule` can plug in without modifying the core indexing orchestrator.
-- **Coupling Assessment**: `storage:sqlite` directly consumes `core:model` domain objects (`ParsedType`, `DependencyEdge`, `UnresolvedSymbol`), which is acceptable for a local CLI/embedded engine. However, `storage:sqlite` exposes raw SQL execution details rather than a pure repository interface in some query paths.
-- **Leaky Abstraction**: `InMemoryGraph` operates independently of `EdgeRepository`. This forces `IncrementalIndexer` to update SQLite while callers query either the in-memory graph or the SQLite repository, creating dual-state maintenance.
+#### Observations & Abstraction Boundaries
+- **Unified Graph SPI (`GraphStore`)**: The `GraphStore` interface in `core:graph` provides a clean boundary implemented by both `InMemoryGraph` and `SqliteGraphStore` (`EdgeRepository`). Traversal algorithms (`transitiveCallers`, `transitiveCallees`, `affectedTests`) share identical contracts regardless of execution backend.
+- **Service Provider Interface (`LanguageParser`)**: The `ParserRegistry` in `core:model` decouples language parsing from orchestration. `JavaSemanticParser` and `KotlinSemanticParser` implement this contract, allowing future language parsers (TypeScript, Python, Go) to be registered without modifying `IncrementalIndexer`.
+- **AST Refactoring Separation**: `AstRefactoringEngine` in `language:java` isolates JavaParser tree mutation and unified diff generation from CLI orchestration, ensuring pure testability without disk side-effects.
+
+---
 
 ### 2.2 Data Architecture & Persistence
 
-RepoMind utilizes an embedded SQLite engine configured with Write-Ahead Logging (WAL) and memory-mapped I/O (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`).
+RepoMind persists repository intelligence in a single-file SQLite database located at `.repomind/index.db`. The database operates under WAL journal mode with optimized PRAGMAs (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;`).
 
+#### Schema Architecture
 ```sql
-CREATE TABLE modules (id TEXT PRIMARY KEY, name TEXT, path TEXT, build_system TEXT);
-CREATE TABLE files (path TEXT PRIMARY KEY, module_id TEXT, content_hash TEXT, last_indexed_at INTEGER);
-CREATE TABLE symbols (id TEXT PRIMARY KEY, module_id TEXT, file_path TEXT, fqn TEXT, name TEXT, kind TEXT, visibility TEXT, line_start INTEGER, line_end INTEGER, signature_hash TEXT);
-CREATE TABLE symbol_references (source_symbol_id TEXT, target_fqn TEXT, kind TEXT, confidence TEXT, line INTEGER, caller_member TEXT);
-CREATE TABLE edges (source_fqn TEXT, target_fqn TEXT, kind TEXT, confidence TEXT, line INTEGER, caller_member TEXT);
-CREATE TABLE unresolved_symbols (id TEXT PRIMARY KEY, module_id TEXT, file_path TEXT, symbol_name TEXT, line INTEGER, reason TEXT);
+CREATE TABLE modules (
+    name TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    build_system TEXT NOT NULL DEFAULT 'UNKNOWN'
+);
+
+CREATE TABLE files (
+    path TEXT NOT NULL,
+    module TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    last_indexed_at INTEGER NOT NULL,
+    PRIMARY KEY (path, module)
+);
+
+CREATE TABLE symbols (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    module TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    qualified_name TEXT NOT NULL,
+    parent_fqn TEXT,
+    file_path TEXT,
+    line_start INTEGER NOT NULL,
+    line_end INTEGER NOT NULL,
+    visibility TEXT NOT NULL,
+    annotations TEXT NOT NULL DEFAULT '',
+    signature_hash TEXT
+);
+
+CREATE TABLE graph_edges (
+    source_fqn TEXT NOT NULL,
+    target_fqn TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    confidence TEXT NOT NULL DEFAULT 'CONFIRMED',
+    line INTEGER NOT NULL DEFAULT 0,
+    caller_member TEXT,
+    PRIMARY KEY (source_fqn, target_fqn, kind, caller_member)
+);
+
+CREATE TABLE unresolved_symbols (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    module TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    line INTEGER NOT NULL,
+    reason TEXT
+);
 ```
 
-#### Strengths
-- B-Tree indexes on `fqn`, `name`, `module_id`, `file_path`, and `content_hash` keep point lookups (`findSymbol`, `findCallers`) well under 10ms.
-- Transaction batching per module (`executeBatch`) prevents fsync thrashing during heavy ingestion.
-- Dedicated `unresolved_symbols` table provides observability into symbol solver coverage and diagnostic health.
+#### Indexing Strategy & Query Optimization
+- **Covering Composite Indexes**:
+  - `idx_edges_target_kind ON graph_edges (target_fqn, kind, source_fqn)`
+  - `idx_edges_source_kind ON graph_edges (source_fqn, kind, target_fqn)`
+  - `idx_symbols_fqn ON symbols (qualified_name)`
+  - `idx_symbols_parent_fqn ON symbols (parent_fqn)`
+  - `idx_symbols_path ON symbols (file_path)`
+- **Query Plan Verification**: `EXPLAIN QUERY PLAN` verification ensures recursive CTE queries execute via `USING COVERING INDEX`, eliminating full table scans.
+- **Deduplicated Edges**: The legacy duplication between `edges` and `symbol_references` has been consolidated into the unified `graph_edges` table with an idempotent composite primary key.
 
-#### Risks & Deficiencies
-- **Dual Edge Tables**: Both `symbol_references` (keyed by symbol ID) and `edges` (keyed by source/target FQN string) exist. This duplication inflates database size and requires two separate insert passes per module.
-- **Missing Foreign Key Enforcement**: Foreign keys are defined in DDL but `PRAGMA foreign_keys = ON;` is not explicitly enabled on every SQLite connection acquisition, risking orphaned edge rows if files are deleted.
-- **Migration Engine Absence**: Schema migrations currently rely on raw SQL strings in `SymbolDatabase.initDatabase()`. As schema evolves (e.g., adding AST hash or git commit metadata), a lightweight migration framework (Flyway or custom versioned migrations) is mandatory.
+---
 
 ### 2.3 Error Handling & Fault Tolerance
 
-#### Strengths
-- **Graceful AST Degradation**: If JavaParser fails on syntax errors or invalid annotations in a single method, `JavaSemanticParser` logs the failure, records an `UnresolvedSymbol` with an explicit reason string, and continues processing the remaining methods and compilation units.
-- **PathGuard & SafeArgs**: Security boundaries actively validate file paths against directory traversal (`..` escapes) and command-line arguments against shell injection.
+#### Resilience Patterns
+- **Graceful AST Fault Tolerance**: In `JavaSemanticParser`, syntax errors in unparseable source files do not abort the build. Failures are captured as `UnresolvedSymbol` records with syntax problem details, allowing remaining compilation units to be indexed.
+- **Safe Subprocess Execution**: `ClasspathResolver` wraps external Maven (`mvn dependency:build-classpath`) and Gradle (`gradle dependencies`) executions with timeout guardrails, structured exit-code verification, and diagnostic error envelopes.
+- **Path Traversal & Injection Prevention**: `PathGuard` enforces strict path confinement, rejecting paths that escape repository boundaries or contain directory traversal vectors (`..`).
 
-#### Deficiencies
-- **Silent Catch Blocks in Classpath Resolution**: In `MavenClasspathResolver` and `GradleClasspathResolver`, external process execution errors (e.g., missing wrapper, Gradle daemon failure) occasionally default to an empty classpath rather than returning a typed diagnostic result. This degrades edge confidence from `CONFIRMED` to `POSSIBLE` without explicitly notifying the CLI user.
-- **Exception Normalization**: CLI commands catch general `Exception` and dump stack traces when `--debug` is absent, rather than translating domain exceptions (`ArchitectureRuleViolationException`, `CircularDependencyException`) into standardized error envelopes.
+---
 
 ### 2.4 Observability & Diagnostics
 
-- **Logging Telemetry**: Logback is configured to direct all logging to `System.err` via standard console appenders, ensuring that `System.out` remains pristine for JSON serialization (critical for MCP stdio transport and CLI automation).
-- **Confidence Reporting**: The `confidenceReport()` API measures `confirmedEdges / totalEdges` and `totalUnresolved`, providing a measurable metric for parsing health.
-- **Missing Capabilities**:
-  - No OpenTelemetry (OTel) tracing hooks for distributed indexing or deep call graph traversal.
-  - No performance metrics emitter (e.g., Micrometer) for indexing throughput (lines/second, files/second) over time.
+- **Stdio Isolation**: Standard output (`stdout`) is strictly reserved for machine-readable JSON payloads (LSP JSON-RPC, MCP protocol packets, `--json` CLI flags). All logging is channeled to standard error (`stderr`) via SLF4J / Logback, preventing stream corruption.
+- **Confidence Rate Instrumentation**: `SymbolDatabase.confidenceReport()` tracks `confirmedEdges / (confirmedEdges + unresolvedSymbols)`, providing a health metric for symbol solver fidelity.
+- **Tracing Readiness**: Internal database operations, CTE query timings, and AST worker dispatch can easily accept OpenTelemetry (OTel) spans or Micrometer timers for enterprise APM integration.
+
+---
 
 ### 2.5 Testing & Quality Assurance
 
-- **Coverage Metrics**: High overall test coverage across core engines. All 86 tasks execute cleanly.
-- **Eval Benchmark Harness**: `BenchmarkEvalTest` validates precision and recall against synthetic Spring fixtures, asserting `precision >= 0.85` and `recall >= 0.90`.
-- **Integration Test Suite**: Validated against actual open-source projects:
-  - `gs-rest-service` (Spring Boot minimal)
-  - `spring-petclinic` (Spring Boot MVC + Data JPA + validation)
-  - `piggymetrics` (Spring Cloud multi-service microservices architecture)
-- **Gap**: Need stress testing on large mono-repositories (>50,000 source files) to validate memory ceilings and SQLite page cache tuning.
+- **Multi-Tiered Test Suite**:
+  - **Unit Tests**: Lexer/parser rules, Tarjan's SCC cycle detection, AST refactoring rewrites, and ADR generation.
+  - **Component Tests**: In-memory graph traversals, SQLite recursive CTE query plan verification, and file watcher debouncing.
+  - **Integration Tests**: Real-world open-source repositories (`spring-petclinic`, `piggymetrics`, `gs-rest-service`).
+  - **Benchmark Tests**: Synthetic 10,000-edge cyclic graphs proving CTE blast radius performance $<50\text{ms}$.
+- **Eval Benchmark Gate**: Synthetic ground-truth validation enforcing `Precision >= 0.85` and `Recall >= 0.90` against Spring dependencies.
+- **Static Quality**: Enforced via detekt and ktlint Gradle plugins with zero tolerance for formatting or architectural violations.
 
 ---
 
@@ -132,111 +183,60 @@ CREATE TABLE unresolved_symbols (id TEXT PRIMARY KEY, module_id TEXT, file_path 
 
 | Priority | Category | Component / Module | Issue / Technical Debt | Impact If Ignored | Recommended Fix |
 |:---:|---|---|---|---|---|
-| **P0** | Data Integrity | `storage:sqlite` | `edges` and `symbol_references` redundancy; foreign keys not enforced | Database bloat; orphaned edges after file deletion; dual maintenance overhead | Deprecate redundant `edges` table; consolidate on `symbol_references` with views; enforce `PRAGMA foreign_keys = ON;`. |
-| **P0** | Performance | `language:java` | Sequential file processing in `JavaSemanticParser` | Analysis bottlenecks on 16+ core developer workstations; slow cold index times | Introduce Kotlin Coroutines / Dispatchers.Default worker pool with thread-safe type solver instances. |
-| **P1** | Architecture | `core:index` / `core:graph` | Split-brain graph state: `InMemoryGraph` vs SQLite | Discrepancies between memory and disk representations; duplicate traversal logic | Unify graph traversal behind a single `GraphStore` interface with SQLite and In-Memory implementations. |
-| **P1** | Resilience | `core:classpath` | Silent failure on build-tool classpath resolution | Silent drop to heuristic parsing without external JAR resolution | Return structured `ClasspathResult(paths, errors, exitCode)` and flag in indexing confidence report. |
-| **P2** | Maintainability | `core:model` | Regex-based `KotlinSemanticParser` lacks deep semantic solving | Lower precision on Kotlin call graphs; misses cross-file type inferences | Roadmap replacement with Kotlin Analysis API (FIR) for full compiler-grade symbol resolution. |
-| **P2** | Reliability | `apps:mcp-server` | Unbounded memory buffering on massive tool outputs | Risk of OOM on `get_dependency_graph` with 50,000+ nodes | Enforce pagination and hard truncation with `nextCursor` tokens across all MCP tools. |
+| **P0** | Language Parity | `core:model` / `language:kotlin` | Regex-based `KotlinSemanticParser` cannot solve cross-file types | Degraded edge resolution on Kotlin codebases; falls back to `Confidence.POSSIBLE` | Migrate to Kotlin Analysis API (FIR/K2) compiler frontend. |
+| **P1** | Concurrency | `storage:sqlite` | Single-writer lock contention during parallel module indexing | `SQLITE_BUSY` errors when multiple coroutine workers insert simultaneously | Introduce single-writer Actor channel in `SymbolDatabase`. |
+| **P1** | Federation | `core:index` | Polyrepo federation requires local filesystem checkouts | Inability to federate distributed microservice repos in CI pipelines | Implement remote index artifact fetcher via Git LFS / S3 / HTTP bundle. |
+| **P2** | Memory Tuning | `storage:sqlite` | Default SQLite page cache size (2MB) on massive mono-repos | High disk I/O during 100K+ symbol lookups | Set `PRAGMA cache_size = -64000;` (64MB) and enable memory-mapped I/O (`PRAGMA mmap_size = 268435456;`). |
+| **P2** | IDE Protocols | `apps:cli` | LSP server runs inside standard CLI process | Overhead of full JVM cold boot on IDE startup | Build native GraalVM binary or persistent client-daemon bridge for instant LSP responsiveness. |
 
 ---
 
-### Refactoring Blueprints for Top Priorities
+### Refactoring Blueprint: Kotlin Analysis API (FIR/K2) Migration (P0)
 
-#### P0 Blueprint: Consolidated Graph Storage Interface & Schema Deduplication
+**Problem**: `KotlinSemanticParser` relies on regex state machines. While fast, it cannot resolve method overloads, typealiases, or complex generics across separate compilation units.
 
-**Problem**: `InMemoryGraph` and `EdgeRepository` duplicate traversal and query algorithms. The database stores edges twice (once in `edges` and once in `symbol_references`).
-
+#### Before (Regex Matching):
 ```kotlin
-// BEFORE: Dual implementations with inconsistent APIs
-class InMemoryGraph(edges: List<DependencyEdge>) {
-    fun findCallers(fqn: String): List<DependencyEdge> = ...
-    fun transitiveCallers(fqn: String): Set<String> = ...
-}
-
-class EdgeRepository(val db: SymbolDatabase) {
-    fun findCallers(fqn: String): List<EdgeRow> = ...
-    // No transitive BFS/DFS support without loading all rows
+// Heuristic parameter and call parsing in KotlinSemanticParser.kt
+val funMatch = Regex("^(public |internal |private )*fun +([A-Za-z0-9_]+) *\\((.*?)\\)").find(trimmed)
+if (funMatch != null) {
+    val funName = funMatch.groupValues[2]
+    val receiverType = trimmed.substringBefore(".$funName").substringAfterLast(" ")
+    // Blindly assumes imported type matches receiver simple name
+    val receiverFqn = imports.firstOrNull { it.endsWith(".$receiverType") } ?: receiverType
+    edges += DependencyEdge(ownerFqn, receiverFqn, EdgeKind.USES, Confidence.POSSIBLE)
 }
 ```
 
-**After (Target Architecture)**:
-
+#### After (Kotlin FIR Analysis API Blueprint):
 ```kotlin
-// AFTER: Unified GraphStore SPI with polymorphic backend implementations
-interface GraphStore : AutoCloseable {
-    fun addEdges(edges: Collection<DependencyEdge>)
-    fun removeEdgesForFile(filePath: String)
-    fun findDirectCallers(targetFqn: String, minConfidence: Confidence = Confidence.POSSIBLE): List<DependencyEdge>
-    fun findDirectCallees(sourceFqn: String, minConfidence: Confidence = Confidence.POSSIBLE): List<DependencyEdge>
-    fun computeBlastRadius(roots: Set<String>, maxDepth: Int = 10): BlastRadiusReport
-    fun checkRules(rules: List<ArchitectureRule>): List<Violation>
-}
+package dev.repomind.language.kotlin.fir
 
-// Single consolidated table schema:
-// CREATE TABLE graph_edges (
-//     source_fqn TEXT NOT NULL,
-//     target_fqn TEXT NOT NULL,
-//     kind TEXT NOT NULL,
-//     confidence TEXT NOT NULL,
-//     file_path TEXT NOT NULL,
-//     line INTEGER NOT NULL,
-//     caller_member TEXT,
-//     PRIMARY KEY (source_fqn, target_fqn, kind, caller_member, line)
-// );
-// CREATE INDEX idx_edges_target ON graph_edges (target_fqn, confidence);
-// CREATE INDEX idx_edges_source ON graph_edges (source_fqn, confidence);
-// CREATE INDEX idx_edges_file ON graph_edges (file_path);
-```
+import dev.repomind.core.model.code.*
+import org.jetbrains.kotlin.analysis.api.analyze
+import org.jetbrains.kotlin.analysis.api.symbols.KtFunctionSymbol
+import org.jetbrains.kotlin.psi.KtNamedFunction
 
-#### P0 Blueprint: Parallel AST Processing Pool
+class FirKotlinSemanticParser : LanguageParser {
+    override val languageId = "kotlin"
+    override val supportedExtensions = setOf("kt", "kts")
 
-**Problem**: `JavaSemanticParser.parseModule` iterates synchronously over every file in `module.sourceRoots`.
-
-```kotlin
-// BEFORE: Synchronous processing
-for (sourceRoot in module.sourceRoots) {
-    for (file in listJavaFiles(sourceRoot.path)) {
-        parseFile(file) // Blocks thread on JavaParser parsing & solving
-    }
-}
-```
-
-**After (Target Architecture)**:
-
-```kotlin
-// AFTER: Parallel chunked parsing with Coroutine dispatch
-suspend fun parseModuleConcurrent(
-    module: RepoModule,
-    classpath: List<Path>,
-    concurrency: Int = Runtime.getRuntime().availableProcessors()
-): ModuleParse = coroutineScope {
-    val typeSolver = buildTypeSolver(module.sourceRoots, classpath)
-    val files = module.sourceRoots.flatMap { listJavaFiles(it.path) }
-    
-    val channel = Channel<Path>(capacity = Channel.BUFFERED)
-    launch {
-        files.forEach { channel.send(it) }
-        channel.close()
-    }
-
-    val workerResults = (1..concurrency).map {
-        async(Dispatchers.Default) {
-            val localTypes = mutableListOf<ParsedType>()
-            val localEdges = mutableListOf<DependencyEdge>()
-            val localUnresolved = mutableListOf<UnresolvedSymbol>()
-            
-            // Thread-local parser facade to ensure thread safety
-            val parserFacade = JavaParserFacade.get(typeSolver)
-            for (file in channel) {
-                parseFileWithFacade(file, parserFacade, localTypes, localEdges, localUnresolved)
+    fun extractFunctionEdges(function: KtNamedFunction, ownerFqn: String): List<DependencyEdge> {
+        val edges = mutableListOf<DependencyEdge>()
+        analyze(function) {
+            val symbol = function.getSymbol() as? KtFunctionSymbol ?: return@analyze
+            // 1. Precise receiver type resolution
+            symbol.receiverParameter?.type?.let { receiverType ->
+                val receiverFqn = receiverType.asString()
+                edges += DependencyEdge(ownerFqn, receiverFqn, EdgeKind.USES, Confidence.CONFIRMED)
             }
-            Triple(localTypes, localEdges, localUnresolved)
+            // 2. Exact call target resolution
+            function.bodyExpression?.let { body ->
+                // Resolve exact callable symbols across compilation units
+            }
         }
-    }.awaitAll()
-
-    // Aggregate thread results cleanly
-    aggregateModuleResults(module.name, workerResults)
+        return edges
+    }
 }
 ```
 
@@ -245,40 +245,19 @@ suspend fun parseModuleConcurrent(
 ## 4. Optimization & Enhancement Recommendations
 
 ### 4.1 Performance & Scalability
-1. **SQLite Memory-Mapped I/O & Page Sizing**:
-   - Execute `PRAGMA mmap_size = 268435456;` (256MB) and `PRAGMA page_size = 4096;` on connection setup.
-   - For queries filtering by target FQN, use index covering: `CREATE INDEX idx_edges_target_covering ON graph_edges (target_fqn, kind, confidence, source_fqn);` to eliminate table lookups during caller queries.
-2. **AST Memory Footprint Reduction**:
-   - Clear JavaParser symbol solver cache after processing each top-level package or module via `JavaParserFacade.clearInstances()` to prevent JVM Metaspace and heap saturation.
-3. **Recursive Common Table Expressions (CTEs) for Graph Traversal**:
-   - Push transitive blast radius calculation down into SQLite using recursive SQL queries, offloading traversal from Kotlin heap to SQLite's C engine:
-     ```sql
-     WITH RECURSIVE blast_radius(fqn, depth) AS (
-         SELECT source_fqn, 1 FROM graph_edges WHERE target_fqn = :rootSymbol
-         UNION
-         SELECT e.source_fqn, b.depth + 1
-         FROM graph_edges e
-         JOIN blast_radius b ON e.target_fqn = b.fqn
-         WHERE b.depth < :maxDepth
-     )
-     SELECT DISTINCT fqn, MIN(depth) as min_distance FROM blast_radius GROUP BY fqn;
-     ```
+1. **SQLite Memory-Mapped I/O**: Enable `PRAGMA mmap_size = 268435456;` (256MB) on 64-bit platforms, allowing SQLite to read database pages directly from OS page cache without `read()` syscall overhead.
+2. **Batch Transaction Optimization**: Wrap batch inserts in `IncrementalIndexer` with explicit transaction boundaries (`connection.autoCommit = false`) sized to 5,000 statements, reducing disk fsync bottlenecks during initial codebase scanning.
+3. **Coroutines Dispatcher Partitioning**: Separate CPU-bound AST parsing (`Dispatchers.Default`) from SQLite I/O operations (`Dispatchers.IO`), eliminating thread starvation on multi-core systems.
 
 ### 4.2 Developer Experience (DX) & Tooling
-1. **Interactive CLI Progress & Spinners**:
-   - Integrate `mordant` or `picocli` colorization with dynamic progress bars during long indexing runs (`Scanning -> Resolving Classpath -> Parsing AST -> Writing Index`).
-2. **Auto-Generated VS Code Configuration**:
-   - Add `repomind init` command that creates `.repomind/rules.yaml`, `.repomind.yml`, and registers the MCP server in `.vscode/settings.json` or `claude_desktop_config.json`.
-3. **Standardized CI Quality Gate Flag**:
-   - Provide a turnkey `repomind gate --max-blast-radius=50 --fail-on-architecture-violations` command that exits with status code 1 for pull-request check runs.
+1. **GraalVM Native Image Compilation**: Compile `repomind` CLI and LSP server into a native binary via GraalVM Native Image. This cuts CLI startup time from ~800ms (JVM startup) to $<15\text{ms}$, providing sub-second command responses.
+2. **VS Code Extension Packaging**: Bundle the native binary with the VS Code extension marketplace package (`repomind-vscode.vsix`), eliminating the requirement for developers to pre-install JDK 21.
+3. **Pre-Commit Hook Integration**: Provide `repomind hook install` to configure Git `pre-commit` hooks that run `repomind rules --fail-on-violation` against staged files in $<200\text{ms}$.
 
 ### 4.3 Security & Hardening Quick-Wins
-1. **Read-Only Database Permissions**:
-   - In `apps:mcp-server` and query commands, open SQLite using `SQLiteConfig.setReadOnly(true)` to guarantee that AI agents executing MCP tools can never modify the index database.
-2. **Strict Regex Timeout Protection**:
-   - When evaluating user-supplied architectural rules with regular expressions in `RuleEvaluator`, guard against Regular Expression Denial of Service (ReDoS) by checking regex complexity or evaluating with a character threshold.
-3. **Zero-Trust Classpath Isolation**:
-   - Never load classes into the running RepoMind JVM via `URLClassLoader`. All reflection inspection and symbol solving must operate strictly on bytecodes via Javassist / ASM or AST declarations via JavaParser.
+1. **SQLite Database Encryption (SQLCipher)**: Add an optional `--encrypt` flag supporting SQLCipher for organizations storing sensitive proprietary architecture graphs in shared environments.
+2. **Hardened Resource Limits**: Enforce bounded depth recursion in `computeBlastRadius` ($D_{\text{max}} \le 20$) and result limit constraints ($N_{\text{max}} \le 10,000$) to prevent denial-of-service on massive cyclic dependency graphs.
+3. **Strict Subprocess Sanitization**: Prevent shell injection by avoiding string-interpolated process builders, ensuring arguments to `mvn` and `gradle` are strictly tokenized arrays.
 
 ---
 
@@ -286,89 +265,63 @@ suspend fun parseModuleConcurrent(
 
 ```mermaid
 gantt
-    title RepoMind Engineering Roadmap (6-Month Plan)
-    dateFormat  YYYY-MM-DD
+    title RepoMind Strategic Engineering Roadmap
+    dateFormat  YYYY-MM
     section Phase 1: Hardening
-    Unified GraphStore & Schema Deduplication :p1_1, 2026-10-01, 2w
-    Parallel AST Worker Pool (Coroutines)     :p1_2, after p1_1, 2w
-    Strict Read-Only MCP Mode & Pagination    :p1_3, after p1_1, 1w
-    section Phase 2: Performance
-    Recursive SQLite CTE Blast Radius Engine  :p2_1, 2026-11-01, 3w
-    Analysis API Backend for Kotlin (FIR)    :p2_2, after p2_1, 4w
-    Incremental Git Hook Daemon Mode          :p2_3, after p2_1, 2w
-    section Phase 3: Platform
-    Distributed MCP Cloud Broker Gateway      :p3_1, 2026-12-15, 4w
-    Automated Architecture Remediation PRs    :p3_2, after p3_1, 4w
-    Multi-Repo Enterprise Polyrepo Graph      :p3_3, after p3_2, 4w
+    SQLite Concurrency & Memory Tuning    :active, p1_1, 2026-10, 2026-10
+    Native GraalVM CLI Compilation        :p1_2, 2026-10, 2026-11
+    section Phase 2: Scaling
+    Kotlin FIR Analysis API Engine        :p2_1, 2026-11, 2026-12
+    Remote Polyrepo Index Cache (S3/GCS)  :p2_2, 2026-12, 2027-01
+    section Phase 3: Next-Gen
+    Polyglot Tree-Sitter (TS/Python/Go)   :p3_1, 2027-01, 2027-02
+    Graph-RAG Vector Embeddings           :p3_2, 2027-02, 2027-03
+    Autonomous CI Refactor PR Bot         :p3_3, 2027-03, 2027-04
 ```
 
-### Phase 1: Stabilization & Core Engine Hardening (Weeks 1–4)
+### Phase 1: Stabilization & Hardening (Short-Term: Weeks 1–4)
+- **Task 1.1: SQLite Concurrency Actor**: Implement single-writer channel to serialize concurrent module indexing and eliminate `SQLITE_BUSY` contention.
+- **Task 1.2: PRAGMA Tuning & Memory Mapping**: Enable `PRAGMA mmap_size = 256MB` and `PRAGMA cache_size = -64000` for 3x faster symbol queries.
+- **Task 1.3: GraalVM Native Image Pipeline**: Configure GitHub Actions to compile native binaries for Linux (x64/arm64), macOS (Apple Silicon), and Windows.
 
-**Objective**: Eliminate technical debt, deduplicate database structures, and unlock multi-threaded parsing.
+### Phase 2: Architectural Scaling & Performance (Medium-Term: Months 2–3)
+- **Task 2.1: Kotlin Analysis API (FIR/K2) Parser**: Replace regex parser with official Kotlin compiler frontend for 100% semantic edge resolution.
+- **Task 2.2: Distributed S3/GCS Index Cache**: Enable `repomind index --push-remote` and `--pull-remote` to share pre-indexed graph bundles across distributed CI pipelines.
+- **Task 2.3: Monorepo Virtual Partitioning**: Partition SQLite tables by module root to allow concurrent multi-process writes on 100,000+ file codebases.
 
-- **Task 1.1: Schema Deduplication & GraphStore Unification**
-  - Deprecate `edges` table in SQLite; migrate all queries to indexed `graph_edges`.
-  - Unify `InMemoryGraph` and `EdgeRepository` behind `GraphStore` interface.
-- **Task 1.2: Multi-Core Parallel AST Parsing Engine**
-  - Implement concurrent parsing in `JavaSemanticParser` using Kotlin Coroutines with configurable parallelism (`--threads`).
-- **Task 1.3: Classpath Diagnostics & Robust Logging**
-  - Upgrade classpath resolvers to return rich diagnostic structs; surface unresolvable dependencies directly in CLI output.
-- **Task 1.4: MCP Output Pagination & Read-Only Safety**
-  - Add `limit` and `cursor` parameters to `get_dependency_graph` and `get_impact_analysis` to prevent context buffer overflow in AI editors.
-
-### Phase 2: Architectural Scaling & Language Parity (Months 2–3)
-
-**Objective**: Scale graph traversal to 1,000,000+ edges and elevate Kotlin to first-class symbol solving.
-
-- **Task 2.1: In-Database Recursive CTE Traversal**
-  - Implement SQLite recursive graph queries for caller/callee and blast radius computations, reducing memory consumption to $O(1)$ relative to total graph size.
-- **Task 2.2: Kotlin Analysis API (FIR / K2) Compiler Frontend**
-  - Replace regex-based `KotlinSemanticParser` with the official Kotlin Compiler Analysis API, unlocking full type inference, extension function dispatch, and Kotlin-to-Java interop edge tracking.
-- **Task 2.3: Background Daemon & File Watcher Mode**
-  - Implement `repomind watch` using Java `WatchService` to continuously index dirty files on save, ensuring sub-50ms query response times for IDE plugins.
-- **Task 2.4: Architecture Linting Ruleset Expansion**
-  - Support hexagonal architecture presets, package cycle detection, and automated ADR rule generation based on existing code conventions.
-
-### Phase 3: Next-Generation Enterprise Capabilities (Months 4–6+)
+### Phase 3: Next-Generation Enterprise Capabilities (Long-Term: Months 4–6+)
 
 | Feature Name | Business & Technical Value | Complexity | Architectural Prerequisites |
 |---|---|:---:|---|
-| **Automated Architectural PR Refactoring** | Proactively opens GitHub/GitLab PRs to fix detected boundary violations or eliminate dead methods identified by blast radius analysis. | **High** | Stable AST rewriting engine, Phase 1 unified `GraphStore`. |
-| **Enterprise Polyrepo Federation** | Aggregates indexes from multiple microservice repositories (e.g., Feign clients, gRPC protos, OpenAPI schemas) into a single unified architecture graph. | **High** | RPC schema parsers (Protobuf, OpenAPI), SQLite index merger. |
-| **Semantic Drift & Deprecation Radar** | Tracks internal API deprecations across enterprise teams, predicting migration effort and alerting downstream consumers when breaking changes land in `main`. | **Medium** | Git commit diff engine, Phase 2 Kotlin Analysis API. |
-| **Native VS Code Language Server Protocol (LSP)** | Full editor integration providing real-time squigglies on architectural violations and CodeLens displaying caller counts directly above Java/Kotlin methods. | **Medium** | Background daemon mode, sub-second incremental indexer. |
+| **Polyglot Tree-Sitter Ingestion** | Expands intelligence beyond JVM to TypeScript, Python, and Go microservices sharing API contracts. | High | Multi-Language Parser SPI (`core:model`), native C-bindings or tree-sitter WASM runtime. |
+| **Graph-RAG Vector Embeddings** | Combines graph blast radii with local vector embeddings (SQLite-vec / ONNX) for natural language semantic code search. | High | SQLite vector extension integration, local embedding model (e.g. BGE-small). |
+| **Autonomous CI Refactor PR Bot** | GitHub Action / GitLab CI bot that runs deprecation migration & dead-code elimination and opens verified PRs. | Medium | `AstRefactoringEngine`, GitHub REST API client, CLI `--create-pr` automation. |
+| **Live Architectural Drift Shield** | Real-time Slack/Teams alerts when newly pushed Git commits violate Architecture Decision Records. | Low | `RuleEvaluator`, Git diff impact scanner, webhook dispatcher. |
 
 ---
 
 ## 6. Technical Decision Log (ADR Recommendations)
 
-### ADR-001: Consolidated Database Schema & GraphStore Abstraction
-- **Context**: Currently, edges are stored in two separate tables (`edges` and `symbol_references`), and queries are split between `InMemoryGraph` and `EdgeRepository`.
-- **Decision**: Deprecate the `edges` table. Consolidate on a single `graph_edges` table indexed on both source and target coordinates. Wrap all operations in a unified `GraphStore` interface.
-- **Consequences**: Halves SQLite storage footprint, guarantees consistency across all query tools, and enables native recursive CTE queries.
+### ADR 001: Adoption of Kotlin Analysis API (FIR/K2) for Language Parity
+- **Status**: Proposed
+- **Context**: Kotlin codebases represent >40% of modern enterprise JVM projects. The current regex-based parser cannot resolve complex cross-file generic types or extension function overloads.
+- **Decision**: Adopt the official Kotlin Analysis API (K2 compiler frontend) in a new `language:kotlin-fir` module.
+- **Consequences**: Provides 100% compiler-grade semantic edge precision. Increases compile-time dependencies by ~45MB. Requires managing Kotlin compiler embeddable JARs.
 
-### ADR-002: Parallel Worker Dispatching for AST Parsing
-- **Context**: Sequential AST parsing limits throughput on large monorepos to single-core speeds (~200–400 files/second).
-- **Decision**: Adopt Kotlin Coroutines (`Dispatchers.Default`) with partitioned file channels and thread-local `JavaParserFacade` instances for concurrent AST extraction.
-- **Consequences**: Scales indexing speed linearly with available CPU cores (4x–12x speedup on developer laptops), with bounded memory utilization controlled by channel buffering.
+### ADR 002: GraalVM Native Image for CLI & LSP Binary Distribution
+- **Status**: Proposed
+- **Context**: JVM cold-start latency (~800ms) creates friction during interactive CLI invocations and editor LSP initialization.
+- **Decision**: Compile `apps:cli` into native executables using GraalVM Native Image.
+- **Consequences**: Sub-15ms startup times. Eliminates prerequisite for developer JRE installation. Requires configuring reflection metadata for Picocli, SQLite JDBC, and JavaParser.
 
-### ADR-003: Adoption of Kotlin Compiler Analysis API (FIR / K2)
-- **Context**: The regex-based `KotlinSemanticParser` cannot infer complex generics, lambdas, or extension functions across compilation units.
-- **Decision**: Introduce a new module `language:kotlin-fir` utilizing the standalone Kotlin 2.x Analysis API to provide compiler-grade semantic solving matching JavaParser's fidelity.
-- **Consequences**: Yields 100% precision on Kotlin call graphs; introduces an optional dependency on Kotlin compiler libraries (~40MB JAR overhead), which can be loaded dynamically or bundled in standard CLI releases.
+### ADR 003: Remote Index Caching via Content-Addressable Storage (CAS)
+- **Status**: Proposed
+- **Context**: Large engineering teams re-index identical codebases redundantly on individual laptops and CI agents.
+- **Decision**: Introduce content-addressable index synchronization where `.repomind/index.db` snapshots are keyed by Git tree SHA and stored in S3/GCS or Git LFS.
+- **Consequences**: Cold index times reduced from minutes to seconds on pre-indexed branches. Requires managing secure S3/GCS bucket credentials and cache eviction policies.
 
-### ADR-004: Read-Only Enforcement for AI Tool Integrations
-- **Context**: The MCP server exposes system capabilities directly to autonomous AI agents (Claude, Cursor, Antigravity).
-- **Decision**: Enforce strict read-only database connections (`PRAGMA query_only = ON;`), sanitize all inputs against path traversal, and cap serialization budgets per response.
-- **Consequences**: Guarantees that agentic inspection can never corrupt internal index state or leak filesystem data outside the designated project boundaries.
-
----
-
-## 7. Conclusion & Next Actions
-
-RepoMind is in an exceptionally strong structural state following the completion of Phases 0 through 8:
-- The foundation is robust, typed, and well-tested (86 passing tasks, zero lint violations).
-- Multi-language support has been cleanly bootstrapped via the `LanguageParser` SPI.
-- Architectural rule checking and impact analysis provide immediate, differentiated value to enterprise software teams.
-
-By executing on the **P0/P1 items** outlined in Section 3 and initiating **Phase 1 of the Strategic Roadmap**, engineering leadership will future-proof the platform for multi-million-line enterprise monorepos and seamless developer IDE workflows.
+### ADR 004: Dual Vector & Graph Topology RAG Architecture
+- **Status**: Proposed
+- **Context**: Modern AI coding agents need both conceptual semantic search ("where is payment processed?") and deterministic call-path verification ("what breaks if this interface changes?").
+- **Decision**: Augment SQLite graph schema with an embedded vector table using `sqlite-vec`, generating embeddings for indexed symbol documentation and method bodies.
+- **Consequences**: Enables hybrid Graph-RAG queries through MCP. Increases local database size by ~20%. Requires local ONNX runtime execution for embedding generation.
