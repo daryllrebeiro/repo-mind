@@ -329,12 +329,28 @@ class CallersCommand : Runnable {
     lateinit var symbol: String
 
     override fun run() {
+        val startedAt = System.nanoTime()
         val dbPath = root.toAbsolutePath().normalize().resolve(".repomind/index.db")
         if (!java.nio.file.Files.isRegularFile(dbPath)) {
-            System.err.println("ERROR: no index at $dbPath â€” run 'repomind index <repo>' first")
+            System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
             kotlin.system.exitProcess(1)
         }
-        val startedAt = System.nanoTime()
+        val repomindDir = root.toAbsolutePath().normalize().resolve(".repomind")
+        val client = dev.repomind.core.index.DaemonClient(repomindDir)
+        if (client.isAvailable()) {
+            val callers = client.queryCallers(symbol)
+            if (callers != null) {
+                val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+                println(
+                    Json.encodeToString(
+                        CallersResultDto.serializer(),
+                        CallersResultDto(symbol = symbol, callerCount = callers.size, callers = callers, elapsedMs = elapsedMs),
+                    ),
+                )
+                return
+            }
+        }
+
         SymbolDatabase.open(dbPath).use { db ->
             val graph = InMemoryGraph(
                 db.edges.findAll().map { row ->
@@ -500,12 +516,25 @@ class WatchCommand : Runnable {
 
     override fun run() {
         val normalizedRoot = root.toAbsolutePath().normalize()
-        val dbPath = normalizedRoot.resolve(".repomind/index.db")
-        if (!java.nio.file.Files.exists(dbPath.parent)) {
-            java.nio.file.Files.createDirectories(dbPath.parent)
+        val repomindDir = normalizedRoot.resolve(".repomind")
+        val dbPath = repomindDir.resolve("index.db")
+        if (!java.nio.file.Files.exists(repomindDir)) {
+            java.nio.file.Files.createDirectories(repomindDir)
         }
+
+        val pidLock = dev.repomind.core.index.DaemonPidLock(repomindDir)
+        try {
+            pidLock.acquire()
+        } catch (e: dev.repomind.core.index.DaemonAlreadyRunningException) {
+            System.err.println("ERROR: ${e.message}")
+            kotlin.system.exitProcess(1)
+        }
+
         val indexer = IncrementalIndexer(dbPath)
         System.err.println("RepoMind Watcher started on $normalizedRoot (press Ctrl+C to stop)...")
+
+        val daemonServer = dev.repomind.core.index.DaemonServer(repomindDir, dbPath)
+        daemonServer.start()
 
         val watcher = dev.repomind.core.index.RepositoryWatcher(
             repoRoot = normalizedRoot,
@@ -519,10 +548,17 @@ class WatchCommand : Runnable {
         )
 
         Runtime.getRuntime().addShutdownHook(Thread {
+            daemonServer.stop()
             watcher.stop()
+            pidLock.release()
         })
 
-        watcher.start(maxIterations, timeoutMs)
+        try {
+            watcher.start(maxIterations, timeoutMs)
+        } finally {
+            daemonServer.stop()
+            pidLock.release()
+        }
     }
 }
 
