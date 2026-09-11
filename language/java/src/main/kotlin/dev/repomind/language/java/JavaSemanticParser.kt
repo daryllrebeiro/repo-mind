@@ -27,15 +27,19 @@ import dev.repomind.core.model.code.ModuleParse
 import dev.repomind.core.model.code.ParsedField
 import dev.repomind.core.model.code.ParsedMethod
 import dev.repomind.core.model.code.ParsedType
+import dev.repomind.core.model.code.LanguageParser
 import dev.repomind.core.model.code.TypeKind
 import dev.repomind.core.model.code.UnresolvedSymbol
 import java.nio.file.Path
 
-class JavaSemanticParser {
+class JavaSemanticParser : LanguageParser {
 
-    fun parseModule(module: RepoModule, classpathJars: List<Path>): ModuleParse {
+    override val languageId: String = "java"
+    override val supportedExtensions: Set<String> = setOf("java")
+
+    override fun parseModule(module: RepoModule, classpath: List<Path>): ModuleParse {
         val config = ParserConfiguration()
-        val typeSolver = buildTypeSolver(module.sourceRoots, classpathJars)
+        val typeSolver = buildTypeSolver(module.sourceRoots, classpath)
         config.setSymbolResolver(JavaSymbolSolver(typeSolver))
         StaticJavaParser.setConfiguration(config)
         JavaParserFacade.clearInstances()

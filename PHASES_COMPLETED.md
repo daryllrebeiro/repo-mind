@@ -16,7 +16,7 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
 | **Phase 5** | Incremental Indexing & Eval Harness | ✅ Complete | Cross-module invalidation, deleted module/file purge, sub-second indexing, quality gate (precision >= 0.85, recall >= 0.90) |
 | **Phase 6** | MCP Server, VS Code Extension & AI Agent Integration | ✅ Complete | Full MCP toolset (callers, callees, rules, dependency graph, impact), compact JSON, VS Code extension scaffolded, MapStruct support |
 | **Phase 7** | Production Readiness (CI/CD, Performance, Security, Observability) | ✅ Complete | GitHub Actions multi-OS CI matrix, Dependabot, performance benchmarks, security hardening, full documentation |
-| **Phase 8** | Multi-Language & Extensibility | 🔄 In Progress | Language parser plugin SPI, Kotlin support, project configuration |
+| **Phase 8** | Multi-Language & Extensibility | ✅ Complete | Language parser SPI, Kotlin semantic parser, ParserRegistry, and .repomind.yml configuration |
 
 ---
 
@@ -103,3 +103,23 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
     - `docs/ARCHITECTURE.md`: Complete subsystem breakdown, dataflow diagram, and SQLite schema documentation.
     - `docs/RULES_GUIDE.md`: Comprehensive guide for writing architectural boundary rules in `.repomind/rules.yaml`.
     - `CONTRIBUTING.md`: Developer onboarding, build commands, and pull request guidelines.
+
+### Phase 8: Multi-Language & Extensibility
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `LanguageParser` SPI (`core/model/.../LanguageParser.kt`):
+    - Pluggable interface for language-specific semantic parsing defining `languageId`, `supportedExtensions`, `canHandle(Path)`, and `parseModule(RepoModule, classpath)`.
+  - `ParserRegistry` (`core/model/.../ParserRegistry.kt`):
+    - Central registry managing language parser implementations, querying by language ID, and matching file paths to the appropriate parser.
+  - `KotlinSemanticParser` (`core/model/.../KotlinSemanticParser.kt`):
+    - Multi-language AST and semantic parser for Kotlin (`.kt`) source files.
+    - Extracts packages, imports, class declarations (classes, interfaces, data classes, enum classes, objects), supertypes (`EXTENDS`), interfaces (`IMPLEMENTS`), functions (`ParsedMethod`), fields/properties (`ParsedField`), annotations, constructor/function parameters (`USES`), and calls within function bodies (`CALLS`).
+  - `JavaSemanticParser.kt`:
+    - Updated to implement `LanguageParser` SPI cleanly, harmonizing `classpath` parameter contracts across languages.
+  - Project Configuration System (`core/config/.../RepoMindConfig.kt`):
+    - Defined `RepoMindProjectConfig` supporting custom rules paths, database location overrides, exclude path patterns, rule configuration overrides, and indexing options.
+    - `RepoMindConfigLoader` supporting `.repomind.yml` and `.repomind.yaml` file discovery and hierarchical parsing with sensible defaults.
+  - Automated Testing & Quality:
+    - Added `MultiLanguageParserTest` verifying Java and Kotlin parser dispatch and AST extraction.
+    - Added `RepoMindConfigTest` verifying YAML project configuration loading and fallback defaults.
+    - Full clean build across all modules with 86 Gradle test tasks passing.
