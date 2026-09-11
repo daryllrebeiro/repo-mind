@@ -189,78 +189,115 @@ class SqliteGraphStore(private val connection: Connection) : GraphStore {
     }
 
     override fun transitiveCallers(fqn: String, maxDepth: Int): Set<String> {
-        val visited = mutableSetOf<String>()
-        var frontier = listOf(fqn.substringBefore('#'))
-        var depth = 0
-        while (frontier.isNotEmpty() && depth < maxDepth && visited.size < RepoMindLimits.MAX_GRAPH_NODES) {
-            val nextFrontier = mutableListOf<String>()
-            for (node in frontier) {
-                val callers = findDirectCallers(node).map { it.sourceFqn.substringBefore('#') }
-                for (caller in callers) {
-                    if (visited.add(caller)) {
-                        nextFrontier.add(caller)
+        if (maxDepth <= 0) return emptySet()
+        val owner = fqn.substringBefore('#')
+        val sql = """
+            WITH RECURSIVE callers_cte(caller_fqn, depth) AS (
+                SELECT DISTINCT
+                    CASE WHEN instr(source_fqn, '#') > 0 THEN substr(source_fqn, 1, instr(source_fqn, '#') - 1) ELSE source_fqn END,
+                    1
+                FROM graph_edges
+                WHERE (target_fqn = ? OR target_fqn = ? OR target_fqn LIKE ?)
+                  AND kind = 'CALLS'
+                UNION
+                SELECT DISTINCT
+                    CASE WHEN instr(e.source_fqn, '#') > 0 THEN substr(e.source_fqn, 1, instr(e.source_fqn, '#') - 1) ELSE e.source_fqn END,
+                    c.depth + 1
+                FROM graph_edges e
+                JOIN callers_cte c ON (e.target_fqn = c.caller_fqn OR e.target_fqn LIKE c.caller_fqn || '#%')
+                WHERE e.kind = 'CALLS'
+                  AND c.depth < ?
+            )
+            SELECT DISTINCT caller_fqn FROM callers_cte WHERE caller_fqn != ? LIMIT ?
+        """.trimIndent()
+        return connection.prepareStatement(sql).use { ps ->
+            ps.setString(1, fqn)
+            ps.setString(2, owner)
+            ps.setString(3, "$owner#%")
+            ps.setInt(4, maxDepth)
+            ps.setString(5, owner)
+            ps.setInt(6, RepoMindLimits.MAX_GRAPH_NODES)
+            ps.executeQuery().use { rs ->
+                buildSet {
+                    while (rs.next()) {
+                        add(rs.getString(1))
                     }
                 }
             }
-            frontier = nextFrontier
-            depth++
         }
-        visited.remove(fqn.substringBefore('#'))
-        return visited
     }
 
     override fun transitiveCallees(fqn: String, maxDepth: Int): Set<String> {
-        val visited = mutableSetOf<String>()
-        var frontier = listOf(fqn.substringBefore('#'))
-        var depth = 0
-        while (frontier.isNotEmpty() && depth < maxDepth && visited.size < RepoMindLimits.MAX_GRAPH_NODES) {
-            val nextFrontier = mutableListOf<String>()
-            for (node in frontier) {
-                val callees = findDirectCallees(node).map { it.targetFqn.substringBefore('#') }
-                for (callee in callees) {
-                    if (visited.add(callee)) {
-                        nextFrontier.add(callee)
+        if (maxDepth <= 0) return emptySet()
+        val owner = fqn.substringBefore('#')
+        val sql = """
+            WITH RECURSIVE callees_cte(callee_fqn, depth) AS (
+                SELECT DISTINCT
+                    CASE WHEN instr(target_fqn, '#') > 0 THEN substr(target_fqn, 1, instr(target_fqn, '#') - 1) ELSE target_fqn END,
+                    1
+                FROM graph_edges
+                WHERE (source_fqn = ? OR source_fqn = ? OR source_fqn LIKE ?)
+                  AND kind = 'CALLS'
+                UNION
+                SELECT DISTINCT
+                    CASE WHEN instr(e.target_fqn, '#') > 0 THEN substr(e.target_fqn, 1, instr(e.target_fqn, '#') - 1) ELSE e.target_fqn END,
+                    c.depth + 1
+                FROM graph_edges e
+                JOIN callees_cte c ON (e.source_fqn = c.callee_fqn OR e.source_fqn LIKE c.callee_fqn || '#%')
+                WHERE e.kind = 'CALLS'
+                  AND c.depth < ?
+            )
+            SELECT DISTINCT callee_fqn FROM callees_cte WHERE callee_fqn != ? LIMIT ?
+        """.trimIndent()
+        return connection.prepareStatement(sql).use { ps ->
+            ps.setString(1, fqn)
+            ps.setString(2, owner)
+            ps.setString(3, "$owner#%")
+            ps.setInt(4, maxDepth)
+            ps.setString(5, owner)
+            ps.setInt(6, RepoMindLimits.MAX_GRAPH_NODES)
+            ps.executeQuery().use { rs ->
+                buildSet {
+                    while (rs.next()) {
+                        add(rs.getString(1))
                     }
                 }
             }
-            frontier = nextFrontier
-            depth++
         }
-        visited.remove(fqn.substringBefore('#'))
-        return visited
     }
 
     override fun transitiveDependents(fqn: String): Set<String> {
-        val visited = mutableSetOf<String>()
-        var frontier = listOf(fqn.substringBefore('#'))
-        var depth = 0
-        while (frontier.isNotEmpty() && depth < RepoMindLimits.DEFAULT_GRAPH_DEPTH && visited.size < RepoMindLimits.MAX_GRAPH_NODES) {
-            val nextFrontier = mutableListOf<String>()
-            for (node in frontier) {
-                val dependents = queryDependents(node)
-                for (dep in dependents) {
-                    if (visited.add(dep)) {
-                        nextFrontier.add(dep)
-                    }
-                }
-            }
-            frontier = nextFrontier
-            depth++
-        }
-        visited.remove(fqn.substringBefore('#'))
-        return visited
-    }
-
-    private fun queryDependents(target: String): List<String> {
-        val sql = "SELECT source_fqn FROM graph_edges WHERE (target_fqn = ? OR target_fqn = ? OR target_fqn LIKE ?) AND kind IN ('CALLS', 'USES', 'EXTENDS', 'IMPLEMENTS')"
+        val owner = fqn.substringBefore('#')
+        val sql = """
+            WITH RECURSIVE dependents_cte(dep_fqn, depth) AS (
+                SELECT DISTINCT
+                    CASE WHEN instr(source_fqn, '#') > 0 THEN substr(source_fqn, 1, instr(source_fqn, '#') - 1) ELSE source_fqn END,
+                    1
+                FROM graph_edges
+                WHERE (target_fqn = ? OR target_fqn = ? OR target_fqn LIKE ?)
+                  AND kind IN ('CALLS', 'USES', 'EXTENDS', 'IMPLEMENTS')
+                UNION
+                SELECT DISTINCT
+                    CASE WHEN instr(e.source_fqn, '#') > 0 THEN substr(e.source_fqn, 1, instr(e.source_fqn, '#') - 1) ELSE e.source_fqn END,
+                    d.depth + 1
+                FROM graph_edges e
+                JOIN dependents_cte d ON (e.target_fqn = d.dep_fqn OR e.target_fqn LIKE d.dep_fqn || '#%')
+                WHERE e.kind IN ('CALLS', 'USES', 'EXTENDS', 'IMPLEMENTS')
+                  AND d.depth < ?
+            )
+            SELECT DISTINCT dep_fqn FROM dependents_cte WHERE dep_fqn != ? LIMIT ?
+        """.trimIndent()
         return connection.prepareStatement(sql).use { ps ->
-            ps.setString(1, target)
-            ps.setString(2, target.substringBefore('#'))
-            ps.setString(3, "${target.substringBefore('#')}#%")
+            ps.setString(1, fqn)
+            ps.setString(2, owner)
+            ps.setString(3, "$owner#%")
+            ps.setInt(4, RepoMindLimits.DEFAULT_GRAPH_DEPTH)
+            ps.setString(5, owner)
+            ps.setInt(6, RepoMindLimits.MAX_GRAPH_NODES)
             ps.executeQuery().use { rs ->
-                buildList {
+                buildSet {
                     while (rs.next()) {
-                        add(rs.getString(1).substringBefore('#'))
+                        add(rs.getString(1))
                     }
                 }
             }
@@ -285,21 +322,45 @@ class SqliteGraphStore(private val connection: Connection) : GraphStore {
     }
 
     override fun affectedTests(fqn: String): Set<String> {
-        val affectedProduction = transitiveDependents(fqn) + fqn.substringBefore('#')
-        if (affectedProduction.isEmpty()) return emptySet()
-        val tests = mutableSetOf<String>()
-        val sql = "SELECT source_fqn FROM graph_edges WHERE target_fqn = ? AND kind = 'TESTS'"
-        connection.prepareStatement(sql).use { ps ->
-            for (prod in affectedProduction) {
-                ps.setString(1, prod)
-                ps.executeQuery().use { rs ->
+        val owner = fqn.substringBefore('#')
+        val sql = """
+            WITH RECURSIVE dependents_cte(dep_fqn, depth) AS (
+                SELECT DISTINCT
+                    CASE WHEN instr(source_fqn, '#') > 0 THEN substr(source_fqn, 1, instr(source_fqn, '#') - 1) ELSE source_fqn END,
+                    1
+                FROM graph_edges
+                WHERE (target_fqn = ? OR target_fqn = ? OR target_fqn LIKE ?)
+                  AND kind IN ('CALLS', 'USES', 'EXTENDS', 'IMPLEMENTS')
+                UNION
+                SELECT DISTINCT
+                    CASE WHEN instr(e.source_fqn, '#') > 0 THEN substr(e.source_fqn, 1, instr(e.source_fqn, '#') - 1) ELSE e.source_fqn END,
+                    d.depth + 1
+                FROM graph_edges e
+                JOIN dependents_cte d ON (e.target_fqn = d.dep_fqn OR e.target_fqn LIKE d.dep_fqn || '#%')
+                WHERE e.kind IN ('CALLS', 'USES', 'EXTENDS', 'IMPLEMENTS')
+                  AND d.depth < ?
+            )
+            SELECT DISTINCT source_fqn 
+            FROM graph_edges 
+            WHERE kind = 'TESTS' 
+              AND (target_fqn = ? OR target_fqn IN (SELECT dep_fqn FROM dependents_cte))
+            LIMIT ?
+        """.trimIndent()
+        return connection.prepareStatement(sql).use { ps ->
+            ps.setString(1, fqn)
+            ps.setString(2, owner)
+            ps.setString(3, "$owner#%")
+            ps.setInt(4, RepoMindLimits.DEFAULT_GRAPH_DEPTH)
+            ps.setString(5, owner)
+            ps.setInt(6, RepoMindLimits.MAX_GRAPH_NODES)
+            ps.executeQuery().use { rs ->
+                buildSet {
                     while (rs.next()) {
-                        tests.add(rs.getString(1))
+                        add(rs.getString(1))
                     }
                 }
             }
         }
-        return tests
     }
 
     override fun findRelatedTests(productionFqn: String): List<DependencyEdge> {

@@ -173,4 +173,20 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
     - Exposed `cursor` parameter in MCP tool schema for `get_dependency_graph`.
   - Full project test suite and static analysis (`./gradlew test detekt ktlintCheck`) fully passing (86 actionable tasks, 0 failures).
 
+---
+
+### Roadmap Phase 2: Architectural Scaling & Language Parity
+#### Task 2.1: In-Database Recursive CTE Traversal
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `storage:sqlite` (`EdgeRepository.kt`):
+    - Replaced client-side iterative while-loops in `transitiveCallers`, `transitiveCallees`, `transitiveDependents`, and `affectedTests` with native SQLite Recursive Common Table Expressions (CTEs).
+    - Single-query execution eliminates $O(N)$ database round-trips and reduces JVM heap allocation overhead to $O(1)$.
+    - Built-in cycle safety via CTE `UNION` set deduplication guarantees loop termination in graphs with circular dependencies.
+    - Preserved configurable depth boundaries (`maxDepth`, `RepoMindLimits.DEFAULT_GRAPH_DEPTH`) and node thresholds (`RepoMindLimits.MAX_GRAPH_NODES`).
+  - `EdgeRepositoryTest.kt`:
+    - Added unit test coverage for multi-hop transitive caller chains, transitive callee chains, cyclic dependency termination, and multi-hop affected test mapping.
+  - Full project test suite and static analysis (`./gradlew test detekt ktlintCheck`) fully passing (86 actionable tasks, 0 failures).
+
+
 
