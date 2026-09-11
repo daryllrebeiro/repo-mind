@@ -51,6 +51,8 @@ class SqliteGraphStore(private val connection: Connection) : GraphStore {
             )
             stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_edges_target ON graph_edges(target_fqn, confidence)")
             stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_edges_source ON graph_edges(source_fqn, confidence)")
+            stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_edges_target_kind ON graph_edges(target_fqn, kind, confidence)")
+            stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_edges_source_kind ON graph_edges(source_fqn, kind, confidence)")
             stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_edges_file ON graph_edges(file_path)")
             stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_edges_module ON graph_edges(module)")
 
@@ -479,6 +481,25 @@ class SqliteGraphStore(private val connection: Connection) : GraphStore {
                 rs.getLong(1)
             }
         }
+
+    fun explainQueryPlan(sql: String, vararg args: Any): List<String> {
+        val explainSql = "EXPLAIN QUERY PLAN $sql"
+        return connection.prepareStatement(explainSql).use { ps ->
+            args.forEachIndexed { i, arg -> ps.setObject(i + 1, arg) }
+            ps.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        val detail = try {
+                            rs.getString("detail")
+                        } catch (_: Exception) {
+                            rs.getString(4)
+                        }
+                        add(detail)
+                    }
+                }
+            }
+        }
+    }
 
     private val COLUMNS = "rowid as id, module, source_fqn, target_fqn, kind, confidence, line, caller_member, file_path"
 
