@@ -229,7 +229,91 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
     - Added `--check-cycles`, `--preset=<name>`, and `--fail-on-violation` options to `repomind rules`.
   - `ArchitectureRulesTest.kt` & `CliCommandsTest.kt`:
     - Verified cycle detection (2-node and multi-hop cycles), acyclic graphs, preset generation, and CLI commands.
-  - All 89 Gradle tasks passing across 15 modules with 0 lint warnings (`./gradlew test detekt ktlintCheck`).
+#### Task 2.1: In-Database Recursive CTE Traversal & Query Plan Verification
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `storage:sqlite` (`EdgeRepository.kt`):
+    - `SqliteGraphStore.computeBlastRadius` using recursive `WITH RECURSIVE` queries in SQLite.
+    - Added covering composite indexes `idx_edges_target_kind` and `idx_edges_source_kind`.
+    - `explainQueryPlan` validating SQLite index usage (`USING COVERING INDEX`) rather than full table scans.
+  - `tests:integration` (`LargeScaleCteBenchmarkTest.kt`):
+    - Benchmark verifying in-database CTE matches in-memory BFS on complex cyclic and deep DAG graphs in < 50ms.
+
+#### Task 2.3: Local IPC Socket Daemon & PID Lock
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `core:index` (`DaemonServer.kt`, `DaemonPidLock.kt`, `DaemonClient.kt`):
+    - Built local IPC socket server with JSON-RPC-style text protocol (`STATUS`, `PING`, `STOP`, `INDEX`).
+    - Implemented atomic PID file locking (`.repomind/daemon.pid`) to prevent concurrent daemon instances.
+    - Integrated automatic single-file re-indexing path (`IncrementalIndexer.updateSingleFile`).
+
+#### Task 2.4: Architecture Decision Record (ADR) Mining
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `core:rules` (`AdrGenerator.kt`):
+    - Architectural convention mining analyzing naming conventions, packaging, and annotations.
+    - Generated structured Markdown ADRs following Michael Nygard template with automatically inferred rules.
+  - `apps:cli` (`Main.kt`):
+    - Added `--suggest-adr` flag to `repomind rules` command.
+
+---
+
+## Phase 3: Next-Generation Enterprise Capabilities
+
+### Phase Summary:
+All 4 major Phase 3 tasks completed and verified with 100% test pass rate across all 15 Gradle modules:
+
+| Task | Capability | Status | Deliverables |
+|---|---|---|---|
+| **Task 3.1** | Automated AST Refactoring Engine | ✅ Complete | `AstRefactoringEngine.kt`, dead code elimination, deprecated method migration, unified diffs, `repomind refactor` |
+| **Task 3.2** | Enterprise Polyrepo Federation | ✅ Complete | `PolyrepoFederation.kt`, Feign & REST endpoint mapping, cross-repo blast radius matrix, `repomind federate` |
+| **Task 3.3** | Semantic Drift & Deprecation Radar | ✅ Complete | `DeprecationRadar.kt`, Javadoc/Kotlin/Java deprecation analysis, migration debt scoring, `repomind deprecations` |
+| **Task 3.4** | Native VS Code LSP Integration | ✅ Complete | `RepoMindLspServer.kt`, JSON-RPC over stdio, diagnostics on save, CodeLens caller counts, hover provenance |
+
+#### Task 3.1: Automated AST Refactoring Engine
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `language:java` (`AstRefactoringEngine.kt`):
+    - Lexical-preserving JavaParser AST rewriter for safe automated code transformations.
+    - Dead code elimination for unreferenced private methods with comment and format preservation.
+    - Deprecated method call rewriting based on `@deprecated` Javadoc tags and annotations.
+    - Unified diff generation (`FileDiff`, `diffUnified`) for interactive dry-run previews.
+  - `apps:cli` (`Main.kt`):
+    - Added `repomind refactor <repo> [--dead-code] [--migrate-deprecated] [--apply] [--create-pr]`.
+
+#### Task 3.2: Enterprise Polyrepo Federation
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `core:index` (`PolyrepoFederation.kt`):
+    - Discovers REST endpoints (`@RestController`, `@RequestMapping`, `@GetMapping`, `@PostMapping`, etc.) and HTTP clients (`@FeignClient`).
+    - Resolves cross-repository API contracts with path variable normalization (`/catalog/{id}` -> `/catalog/{*}`).
+    - Calculates multi-service transitive blast radius identifying upstream calling services and components.
+  - `apps:cli` (`Main.kt`):
+    - Added `repomind federate <repo1> <repo2>... [--output=<file>] [--json]`.
+  - `PolyrepoFederationTest.kt` & `CliCommandsTest.kt`:
+    - Full end-to-end integration and CLI testing across mock catalog and order microservices.
+
+#### Task 3.3: Semantic Drift & Deprecation Radar
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `core:impact` (`DeprecationRadar.kt`):
+    - Scans Java and Kotlin deprecations across annotations and Javadoc `@deprecated` / `@see` / `replaceWith` tags.
+    - Computes migration effort score (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) based on callers and replacement availability.
+    - Identifies direct callers, transitive blast radius, and affected tests for each deprecated API.
+  - `apps:cli` (`Main.kt`):
+    - Added `repomind deprecations <repo> [--output=<file>] [--json]`.
+
+#### Task 3.4: Native VS Code LSP Integration
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `apps:cli` (`RepoMindLspServer.kt`):
+    - Full Language Server Protocol implementation using standard JSON-RPC over stdio.
+    - Real-time architectural rule diagnostics emitted on `textDocument/didSave` with line-accurate violation markers.
+    - CodeLens showing direct caller counts and transitive blast radius above classes and methods.
+    - Hover provider returning edge provenance (call types, confidence levels, and caller member details).
+  - `apps:cli` (`Main.kt`):
+    - Added `repomind lsp <repo>` command for seamless IDE integration.
+
 
 
 
