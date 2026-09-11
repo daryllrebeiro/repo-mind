@@ -14,6 +14,7 @@ data class DependencyEdge(
     val kind: EdgeKind,
     val confidence: Confidence,
     val line: Int = 0,
+    val callerMember: String? = null,
 )
 
 data class ParsedMethod(

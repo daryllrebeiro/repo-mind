@@ -119,6 +119,20 @@ class EdgeRepository(private val connection: Connection) {
             productionFqn,
         )
 
+    fun findCallers(targetFqn: String): List<EdgeRow> =
+        query(
+            "SELECT $COLUMNS FROM edges WHERE (target_fqn = ? OR target_fqn LIKE ?) AND kind = 'CALLS' ORDER BY confidence DESC",
+            targetFqn,
+            "$targetFqn#%",
+        )
+
+    fun findCallees(sourceFqn: String): List<EdgeRow> =
+        query(
+            "SELECT $COLUMNS FROM edges WHERE (source_fqn = ? OR source_fqn LIKE ?) AND kind = 'CALLS' ORDER BY confidence DESC",
+            sourceFqn,
+            "$sourceFqn#%",
+        )
+
     fun packageDependencies(): Map<String, Set<String>> {
         val map = mutableMapOf<String, MutableSet<String>>()
         val all = findAll()

@@ -87,11 +87,15 @@ class JavaSemanticParser {
         val edges = buildEdges(types, importsByType).toMutableList()
         edges += extractCalls(typeSolver, types, cusByType, filesByType, unresolved)
 
-        val confirmedPairs = edges.filter { it.confidence == Confidence.CONFIRMED }
-            .map { Triple(it.sourceFqn, it.targetFqn, it.kind) }.toSet()
-        val deduped = edges.filterNot { e ->
-            e.confidence == Confidence.POSSIBLE && Triple(e.sourceFqn, e.targetFqn, e.kind) in confirmedPairs
-        }
+        val deduped = edges
+            .groupBy { Triple(it.sourceFqn, it.targetFqn, it.kind) }
+            .values
+            .map { group ->
+                group.sortedWith(
+                    compareByDescending<DependencyEdge> { it.confidence == Confidence.CONFIRMED }
+                        .thenByDescending { it.callerMember != null }
+                ).first()
+            }
 
         return ModuleParse(
             moduleName = module.name,
@@ -123,30 +127,71 @@ class JavaSemanticParser {
         val calls = mutableListOf<DependencyEdge>()
         val facade = JavaParserFacade.get(typeSolver)
         val testTypes = types.filter { it.isTest }.map { it.fqn }.toSet()
+        val testCoverageEdges = mutableListOf<DependencyEdge>()
+
+        fun emitCall(sourceClassFqn: String, sourceMethodFqn: String, targetFqn: String, conf: Confidence, line: Int) {
+            val member = if (sourceMethodFqn != sourceClassFqn) sourceMethodFqn.substringAfter('#') else null
+            calls += DependencyEdge(sourceClassFqn, targetFqn, EdgeKind.CALLS, conf, line, member)
+        }
 
         for ((fqn, pair) in cusByType) {
             val (cu, typeDecl) = pair
             val file = filesByType[fqn] ?: continue
+            val qualifiers = extractFieldQualifiers(typeDecl)
+            val isTestClass = fqn in testTypes || typeDecl.annotations.any { it.nameAsString.endsWith("Test") }
+            val mockedTypes = if (isTestClass) extractMockedTypes(typeDecl, types) else emptySet()
 
             for (call in typeDecl.findAll(com.github.javaparser.ast.expr.MethodCallExpr::class.java)) {
                 val line = call.range.map { it.begin.line }.orElse(0)
+                val callerMethod = enclosingCallableFqn(call, fqn)
+                val callName = call.nameAsString
+
+                // Reflection / dynamic dispatch detection
+                if (callName in setOf("invoke", "newInstance", "forName", "getMethod", "getDeclaredMethod")) {
+                    val reflectionTarget = when (callName) {
+                        "invoke" -> "java.lang.reflect.Method#invoke"
+                        "newInstance" -> "java.lang.reflect.Constructor#newInstance"
+                        "forName" -> "java.lang.Class#forName"
+                        else -> "java.lang.reflect.Method#$callName"
+                    }
+                    emitCall(fqn, callerMethod, reflectionTarget, Confidence.POSSIBLE, line)
+                }
+
+                val scopeName = (call.scope.orElse(null) as? com.github.javaparser.ast.expr.NameExpr)?.nameAsString
+                if (isTestClass && scopeName != null && scopeName in mockedTypes) {
+                    continue
+                }
+
                 try {
                     val declaring = call.resolve().declaringType()
                     val declaringFqn = declaring.qualifiedName
-                    calls += DependencyEdge(fqn, "$declaringFqn#${call.nameAsString}", EdgeKind.CALLS, Confidence.CONFIRMED, line)
+                    if (isTestClass && (declaringFqn in mockedTypes || declaring.name in mockedTypes)) {
+                        continue
+                    }
+                    val isReflection = declaringFqn.startsWith("java.lang.reflect") ||
+                        (declaringFqn == "java.lang.Class" && callName in setOf("forName", "getMethod", "getDeclaredMethod", "newInstance"))
+                    val conf = if (isReflection) Confidence.POSSIBLE else Confidence.CONFIRMED
+                    emitCall(fqn, callerMethod, "$declaringFqn#$callName", conf, line)
 
                     if (declaring.isInterface && declaringFqn in projectTypes) {
                         val impls = implsByInterface[declaringFqn].orEmpty()
-                        if (impls.size == 1) {
-                            calls += DependencyEdge(fqn, "${impls.single()}#${call.nameAsString}", EdgeKind.CALLS, Confidence.POSSIBLE, line)
+                        val qualifier = scopeName?.let { qualifiers[it] }
+                        val matchedImpl = qualifier?.let { q ->
+                            impls.firstOrNull { impl ->
+                                val simple = impl.substringAfterLast('.')
+                                simple.equals(q, ignoreCase = true) || simple.replaceFirstChar { it.lowercase() } == q
+                            }
+                        }
+
+                        if (matchedImpl != null) {
+                            emitCall(fqn, callerMethod, "$matchedImpl#$callName", Confidence.CONFIRMED, line)
+                        } else if (impls.size == 1) {
+                            emitCall(fqn, callerMethod, "${impls.single()}#$callName", Confidence.POSSIBLE, line)
                         }
                     }
                     continue
                 } catch (e: Exception) {
-                    // Check if it is an unresolved symbol from call expression
                     if (e is UnsolvedSymbolException) {
-                        // Soft degradation: capture if qualified or meaningful
-                        val callName = call.nameAsString
                         if (callName.isNotEmpty()) {
                             unresolved += UnresolvedSymbol(
                                 symbol = callName,
@@ -158,16 +203,26 @@ class JavaSemanticParser {
                     }
                 }
 
-                val scopeName = (call.scope.orElse(null) as? com.github.javaparser.ast.expr.NameExpr)?.nameAsString
-                    ?: continue
-                val fieldTypeFqn = fieldToFqn(fieldsByTypeAndName[fqn]?.get(scopeName), facade) ?: continue
+                if (scopeName == null) continue
+                val pkg = types.find { it.fqn == fqn }?.packageName
+                val fieldTypeFqn = fieldToFqn(fieldsByTypeAndName[fqn]?.get(scopeName), facade, pkg, types) ?: continue
                 if (fieldTypeFqn !in projectTypes) continue
                 val impls = implsByInterface[fieldTypeFqn].orEmpty()
-                when (impls.size) {
-                    1 -> calls += DependencyEdge(fqn, "${impls.single()}#${call.nameAsString}", EdgeKind.CALLS, Confidence.POSSIBLE, line)
+                val qualifier = qualifiers[scopeName]
+                val matchedImpl = qualifier?.let { q ->
+                    impls.firstOrNull { impl ->
+                        val simple = impl.substringAfterLast('.')
+                        simple.equals(q, ignoreCase = true) || simple.replaceFirstChar { it.lowercase() } == q
+                    }
+                }
+
+                if (matchedImpl != null) {
+                    emitCall(fqn, callerMethod, "$matchedImpl#$callName", Confidence.CONFIRMED, line)
+                } else when (impls.size) {
+                    1 -> emitCall(fqn, callerMethod, "${impls.single()}#$callName", Confidence.POSSIBLE, line)
                     else -> {
                         if (impls.isEmpty()) {
-                            calls += DependencyEdge(fqn, "$fieldTypeFqn#${call.nameAsString}", EdgeKind.CALLS, Confidence.POSSIBLE, line)
+                            emitCall(fqn, callerMethod, "$fieldTypeFqn#$callName", Confidence.POSSIBLE, line)
                         }
                     }
                 }
@@ -175,26 +230,164 @@ class JavaSemanticParser {
 
             for (ctor in typeDecl.findAll(com.github.javaparser.ast.expr.ObjectCreationExpr::class.java)) {
                 val line = ctor.range.map { it.begin.line }.orElse(0)
+                val callerMethod = enclosingCallableFqn(ctor, fqn)
                 try {
                     val created = facade.solve(ctor).getDeclaration()
                         .map { it.declaringType().qualifiedName }
                         .orElse(null)
                     if (created != null && created in projectTypes) {
-                        calls += DependencyEdge(fqn, "$created#<init>", EdgeKind.CALLS, Confidence.CONFIRMED, line)
+                        emitCall(fqn, callerMethod, "$created#<init>", Confidence.CONFIRMED, line)
                     }
                 } catch (_: Exception) {
                 }
             }
+
+            // Test mapping: walk from test methods outward, excluding mocked types
+            if (isTestClass) {
+                for (method in typeDecl.methods) {
+                    val isTestMethod = method.annotations.any { ann ->
+                        ann.nameAsString.substringAfterLast('.') in setOf("Test", "ParameterizedTest", "RepeatedTest", "TestFactory")
+                    }
+                    if (!isTestMethod) continue
+                    val testMethodName = method.nameAsString
+                    val coveredTargets = mutableSetOf<String>()
+
+                    for (call in method.findAll(com.github.javaparser.ast.expr.MethodCallExpr::class.java)) {
+                        val scopeName = (call.scope.orElse(null) as? com.github.javaparser.ast.expr.NameExpr)?.nameAsString
+                        if (scopeName != null && scopeName in mockedTypes) continue
+
+                        try {
+                            val declaring = call.resolve().declaringType()
+                            val declaringFqn = declaring.qualifiedName
+                            if (declaringFqn in mockedTypes || declaring.name in mockedTypes) continue
+                            if (declaringFqn in projectTypes) {
+                                coveredTargets += declaringFqn
+                            }
+                        } catch (_: Exception) {
+                            val pkg = types.find { it.fqn == fqn }?.packageName
+                            val fieldTypeFqn = fieldToFqn(fieldsByTypeAndName[fqn]?.get(scopeName), facade, pkg, types)
+                            if (fieldTypeFqn != null && fieldTypeFqn !in mockedTypes && fieldTypeFqn in projectTypes) {
+                                coveredTargets += fieldTypeFqn
+                            }
+                        }
+                    }
+
+                    for (ctor in method.findAll(com.github.javaparser.ast.expr.ObjectCreationExpr::class.java)) {
+                        try {
+                            val created = facade.solve(ctor).getDeclaration()
+                                .map { it.declaringType().qualifiedName }
+                                .orElse(null)
+                            if (created != null && created in projectTypes && created !in mockedTypes) {
+                                coveredTargets += created
+                            }
+                        } catch (_: Exception) {
+                        }
+                    }
+
+                    for (target in coveredTargets) {
+                        testCoverageEdges += DependencyEdge(
+                            sourceFqn = fqn,
+                            targetFqn = target.substringBefore('#'),
+                            kind = EdgeKind.TESTS,
+                            confidence = Confidence.CONFIRMED,
+                            callerMember = testMethodName,
+                        )
+                    }
+                }
+            }
         }
 
-        return calls.distinctBy { e -> listOf(e.sourceFqn, e.targetFqn, e.kind, e.confidence) } +
-            calls.filter { it.sourceFqn in testTypes && it.targetFqn.substringBefore('#') in projectTypes }
-                .map { DependencyEdge(it.sourceFqn, it.targetFqn.substringBefore('#'), EdgeKind.TESTS, Confidence.POSSIBLE) }
-                .distinctBy { Triple(it.sourceFqn, it.targetFqn, it.kind) }
+        val allEdges = calls.distinctBy { e -> listOf(e.sourceFqn, e.targetFqn, e.kind, e.confidence) } +
+            testCoverageEdges.distinctBy { listOf(it.sourceFqn, it.targetFqn, it.kind) }
+
+        return allEdges.distinctBy { listOf(it.sourceFqn, it.targetFqn, it.kind, it.confidence) }
     }
 
-    private fun fieldToFqn(simpleTypeName: String?, facade: JavaParserFacade): String? {
+    private fun enclosingCallableFqn(node: com.github.javaparser.ast.Node, typeFqn: String): String {
+        var curr: com.github.javaparser.ast.Node? = node.parentNode.orElse(null)
+        while (curr != null) {
+            if (curr is com.github.javaparser.ast.body.MethodDeclaration) {
+                return "$typeFqn#${curr.nameAsString}"
+            }
+            if (curr is com.github.javaparser.ast.body.ConstructorDeclaration) {
+                return "$typeFqn#<init>"
+            }
+            curr = curr.parentNode.orElse(null)
+        }
+        return typeFqn
+    }
+
+    private fun extractFieldQualifiers(typeDecl: TypeDeclaration<*>): Map<String, String> {
+        val qualifiers = mutableMapOf<String, String>()
+        for (field in typeDecl.fields) {
+            val qualifier = field.annotations.firstOrNull {
+                it.nameAsString.substringAfterLast('.') in setOf("Qualifier", "Named")
+            }?.let { ann -> extractAnnotationValue(ann) }
+            if (qualifier != null) {
+                for (v in field.variables) {
+                    qualifiers[v.nameAsString] = qualifier
+                }
+            }
+        }
+        for (ctor in typeDecl.constructors) {
+            for (param in ctor.parameters) {
+                val qualifier = param.annotations.firstOrNull {
+                    it.nameAsString.substringAfterLast('.') in setOf("Qualifier", "Named")
+                }?.let { ann -> extractAnnotationValue(ann) }
+                if (qualifier != null) {
+                    qualifiers[param.nameAsString] = qualifier
+                }
+            }
+        }
+        return qualifiers
+    }
+
+    private fun extractAnnotationValue(ann: com.github.javaparser.ast.expr.AnnotationExpr): String? =
+        when (ann) {
+            is com.github.javaparser.ast.expr.SingleMemberAnnotationExpr -> stripQuotes(ann.memberValue.toString())
+            is com.github.javaparser.ast.expr.NormalAnnotationExpr ->
+                ann.pairs.firstOrNull { it.nameAsString == "value" }?.value?.let { stripQuotes(it.toString()) }
+            else -> null
+        }
+
+    private fun extractMockedTypes(typeDecl: TypeDeclaration<*>, types: List<ParsedType>): Set<String> {
+        val mocked = mutableSetOf<String>()
+        for (field in typeDecl.fields) {
+            val isMock = field.annotations.any {
+                it.nameAsString.substringAfterLast('.') in setOf("Mock", "MockBean", "SpyBean")
+            }
+            if (isMock) {
+                for (v in field.variables) {
+                    val simpleName = v.type.asString().substringBefore('<').substringAfterLast('.')
+                    mocked += v.nameAsString
+                    mocked += simpleName
+                    types.find { it.fqn.endsWith(".$simpleName") || it.fqn == simpleName }?.let { t ->
+                        mocked += t.fqn
+                        types.filter { t.fqn in it.interfaceFqns || it.superTypeFqn == t.fqn }.forEach { impl ->
+                            mocked += impl.fqn
+                            mocked += impl.fqn.substringAfterLast('.')
+                        }
+                    }
+                }
+            }
+        }
+        return mocked
+    }
+
+    private fun fieldToFqn(
+        simpleTypeName: String?,
+        facade: JavaParserFacade,
+        contextPackage: String? = null,
+        types: List<ParsedType> = emptyList(),
+    ): String? {
         if (simpleTypeName == null) return null
+        if (contextPackage != null) {
+            val samePkg = "$contextPackage.$simpleTypeName"
+            if (types.any { it.fqn == samePkg }) return samePkg
+        }
+        val match = types.firstOrNull { it.fqn.substringAfterLast('.') == simpleTypeName }
+        if (match != null) return match.fqn
+
         return try {
             val solved = facade.typeSolver.tryToSolveType(simpleTypeName)
             if (solved.isSolved) {
@@ -255,25 +448,31 @@ class JavaSemanticParser {
 
         val testEdges = mutableListOf<DependencyEdge>()
         for (test in types.filter { it.isTest }) {
+            val mockedTypeNames = test.fields
+                .filter { it.annotations.any { a -> a in setOf("Mock", "MockBean", "SpyBean") } }
+                .map { it.declaredType.substringBefore('<').substringAfterLast('.') }
+                .toSet()
+
             val confirmed = importsByType[test.fqn].orEmpty()
                 .map { it.first }
-                .filter { it in productionFqns }
+                .filter { it in productionFqns && it.substringAfterLast('.') !in mockedTypeNames }
 
             for (target in confirmed) {
                 testEdges += DependencyEdge(test.fqn, target, EdgeKind.TESTS, Confidence.CONFIRMED)
             }
 
             val referencedSimpleNames = (
-                test.fields.filter { !it.synthetic }.map { it.declaredType.substringBefore('<').substringAfterLast('.') } +
+                test.fields.filter { !it.synthetic && it.annotations.none { a -> a in setOf("Mock", "MockBean", "SpyBean") } }
+                    .map { it.declaredType.substringBefore('<').substringAfterLast('.') } +
                     test.methods.flatMap { m -> m.signature.substringAfter('(').substringBefore(')').split(',') }
                         .map { it.trim().substringBefore('<').substringAfterLast('.') } +
                     test.superTypeFqn?.let { listOf(it.substringAfterLast('.')) }.orEmpty()
-                ).filter { it.isNotBlank() && it !in setOf("String", "Integer", "Long", "Boolean", "void", "List", "Map", "Set") }
+                ).filter { it.isNotBlank() && it !in mockedTypeNames && it !in setOf("String", "Integer", "Long", "Boolean", "void", "List", "Map", "Set") }
 
             for (simple in referencedSimpleNames.toSet()) {
                 val candidates = prodBySimpleName[simple].orEmpty()
                 val candidate = candidates.singleOrNull()?.fqn ?: continue
-                if (candidate == test.fqn || candidate in confirmed) continue
+                if (candidate == test.fqn || candidate in confirmed || candidate.substringAfterLast('.') in mockedTypeNames) continue
                 testEdges += DependencyEdge(test.fqn, candidate, EdgeKind.TESTS, Confidence.POSSIBLE)
             }
         }

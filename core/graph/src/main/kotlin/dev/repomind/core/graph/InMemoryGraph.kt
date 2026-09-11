@@ -65,12 +65,22 @@ class InMemoryGraph(edges: Collection<DependencyEdge>) {
     fun transitiveCallers(fqn: String, maxDepth: Int = Int.MAX_VALUE): Set<String> =
         transitive(fqn, TraverseDirection.INCOMING, setOf(EdgeKind.CALLS), maxDepth = maxDepth)
 
+    fun transitiveCallees(fqn: String, maxDepth: Int = RepoMindLimits.DEFAULT_GRAPH_DEPTH): Set<String> =
+        transitive(fqn, TraverseDirection.OUTGOING, setOf(EdgeKind.CALLS), maxDepth = maxDepth)
+
     fun transitiveDependents(fqn: String): Set<String> =
         transitive(
             fqn,
             TraverseDirection.INCOMING,
             setOf(EdgeKind.CALLS, EdgeKind.USES, EdgeKind.EXTENDS, EdgeKind.IMPLEMENTS),
         )
+
+    fun hasDynamicDispatch(fqn: String): Boolean {
+        val owner = fqn.substringBefore('#')
+        val edges = directNeighbors(fqn, TraverseDirection.OUTGOING, setOf(EdgeKind.CALLS)) +
+            directNeighbors(owner, TraverseDirection.OUTGOING, setOf(EdgeKind.CALLS))
+        return edges.any { "reflect" in it.targetFqn || it.targetFqn.startsWith("java.lang.reflect") }
+    }
 
     fun affectedTests(fqn: String): Set<String> {
         val affectedProduction = transitiveDependents(fqn) + fqn
@@ -82,6 +92,8 @@ class InMemoryGraph(edges: Collection<DependencyEdge>) {
             }
         }
     }
+
+    fun testCoverage(fqn: String): Set<String> = affectedTests(fqn)
 
     companion object {
         fun of(edges: Collection<DependencyEdge>): InMemoryGraph = InMemoryGraph(edges)

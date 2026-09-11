@@ -11,8 +11,8 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
 | **Phase 0** | Stabilize the Foundation (JDK 21 LTS, detekt/ktlint, logging, limits) | ✅ Complete | Build passes on JDK 21; detekt/ktlint configured; centralized constants |
 | **Phase 1** | Repository Discovery & Classpath Resolution | ✅ Complete | Build system detection, multi-module scanning, classpath resolution + caching |
 | **Phase 2** | Complete Semantic Parsing & Symbol Indexing | ✅ Complete | JavaParser hardening, SQLite schema finalized, Spring config graph, 3/3 real repo tests |
-| **Phase 3** | Call Graph & Test Mapping | 🔄 In Progress | Method call edges, Spring-aware dispatch, polymorphic resolution, test coverage mapping |
-| **Phase 4** | Impact Analysis Engine & Architecture Rules | ⏳ Pending | Transitive blast radius, confidence scoring, layering rules engine |
+| **Phase 3** | Call Graph & Test Mapping | ✅ Complete | Method-level call edges, Spring @Qualifier dispatch, reflection detection, @MockBean exclusion, JUnit test mapping |
+| **Phase 4** | Impact Analysis Engine & Architecture Rules | 🔄 In Progress | Transitive blast radius, confidence scoring, layering rules engine |
 | **Phase 5** | Incremental Indexing & Eval Harness | ⏳ Pending | Cross-module invalidation, benchmark PR precision/recall eval gate |
 | **Phase 6** | MCP Server, VS Code Extension & AI Agent Integration | ⏳ Pending | MCP tools (compact JSON, streaming/caps), VS Code commands, MapStruct |
 | **Phase 7** | Production Readiness (CI/CD, Performance, Security, Observability) | ⏳ Pending | GitHub Actions, JMH benchmarks, OWASP dependency checks, JaCoCo, user docs |
@@ -38,3 +38,17 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
   - `ConfigurationExtractor`: Extracted `@Configuration` classes, `@Bean` methods with return types and bean names, in addition to `@Value` and `@ConfigurationProperties`.
   - `EdgeRepository`: Added module-level (`moduleDependencies`) and package-level (`packageDependencies`) rollups.
   - `tests/integration`: End-to-end integration tests verified against `gs-rest-service`, `spring-petclinic`, and `piggymetrics`.
+
+### Phase 3: Call Graph & Test Mapping
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `CodeModel.kt`: Added `callerMember` attribute to `DependencyEdge` for method-level caller identification while preserving class-level FQN relationships and deduplication.
+  - `JavaSemanticParser.kt`:
+    - Method-level call edges from parsed AST bodies with `callerMember` tracking.
+    - Spring-aware dispatch: Disambiguates interface calls using `@Qualifier` / `@Named` on fields and constructor injection parameters to concrete `@Bean` / `@Component` implementations with `Confidence.CONFIRMED`. Single implementations resolve to `Confidence.POSSIBLE`.
+    - Polymorphic dispatch: Resolves interface calls without guessing arbitrary single targets when unannotated.
+    - Reflection / dynamic dispatch: Detects `Method.invoke`, `Constructor.newInstance`, `Class.forName` and flags edges with `Confidence.POSSIBLE`.
+    - Test mapping: Walks JUnit test methods (`@Test`, `@ParameterizedTest`, etc.) to production code; extracts and excludes `@MockBean` / `@Mock` / `@SpyBean` boundaries to prevent false test coverage edges.
+  - `InMemoryGraph.kt`: Added `transitiveCallees`, `hasDynamicDispatch`, and `testCoverage` traversal capabilities.
+  - `EdgeRepository.kt`: Added `findCallers` and `findCallees` queries.
+  - `SpringCallGraphTest.kt`: Unit tests verifying Spring `@Qualifier` bean disambiguation, constructor injection resolution, reflection detection, and `@MockBean` exclusion. All 86 test tasks across RepoMind passing cleanly.
