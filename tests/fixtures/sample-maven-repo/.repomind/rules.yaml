@@ -1,0 +1,19 @@
+rules:
+  - name: controllers-cannot-access-repositories
+    description: Controllers must go through a service layer
+    from:
+      annotations: [RestController, Controller]
+    to:
+      annotations: [Repository]
+    message: Use a service between controllers and repositories
+  - name: no-service-to-manager
+    description: Services should not depend on manager-named classes
+    from:
+      namePattern: ".*Service"
+    to:
+      namePattern: ".*Manager"
+  - name: no-service-to-config
+    from:
+      namePattern: ".*Service"
+    to:
+      namePattern: ".*Config"

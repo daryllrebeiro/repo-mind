@@ -12,8 +12,8 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
 | **Phase 1** | Repository Discovery & Classpath Resolution | ✅ Complete | Build system detection, multi-module scanning, classpath resolution + caching |
 | **Phase 2** | Complete Semantic Parsing & Symbol Indexing | ✅ Complete | JavaParser hardening, SQLite schema finalized, Spring config graph, 3/3 real repo tests |
 | **Phase 3** | Call Graph & Test Mapping | ✅ Complete | Method-level call edges, Spring @Qualifier dispatch, reflection detection, @MockBean exclusion, JUnit test mapping |
-| **Phase 4** | Impact Analysis Engine & Architecture Rules | 🔄 In Progress | Transitive blast radius, confidence scoring, layering rules engine |
-| **Phase 5** | Incremental Indexing & Eval Harness | ⏳ Pending | Cross-module invalidation, benchmark PR precision/recall eval gate |
+| **Phase 4** | Impact Analysis Engine & Architecture Rules | ✅ Complete | Transitive blast radius, confidence scoring, git diff impact, architecture rules engine with line numbers and failOnViolation |
+| **Phase 5** | Incremental Indexing & Eval Harness | 🔄 In Progress | Cross-module invalidation, benchmark PR precision/recall eval gate |
 | **Phase 6** | MCP Server, VS Code Extension & AI Agent Integration | ⏳ Pending | MCP tools (compact JSON, streaming/caps), VS Code commands, MapStruct |
 | **Phase 7** | Production Readiness (CI/CD, Performance, Security, Observability) | ⏳ Pending | GitHub Actions, JMH benchmarks, OWASP dependency checks, JaCoCo, user docs |
 | **Phase 8** | Multi-Language & Extensibility | ⏳ Pending | Language parser plugin SPI, Kotlin support, project configuration |
@@ -52,3 +52,20 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
   - `InMemoryGraph.kt`: Added `transitiveCallees`, `hasDynamicDispatch`, and `testCoverage` traversal capabilities.
   - `EdgeRepository.kt`: Added `findCallers` and `findCallees` queries.
   - `SpringCallGraphTest.kt`: Unit tests verifying Spring `@Qualifier` bean disambiguation, constructor injection resolution, reflection detection, and `@MockBean` exclusion. All 86 test tasks across RepoMind passing cleanly.
+
+### Phase 4: Impact Analysis Engine & Architecture Rules
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `ImpactModel.kt`: Extended with `BlastRadius` (methods, classes, tests, modules counts), `ConfigWiringInfo` (bean names, configuration classes, properties), `DiffImpactReport` (multi-symbol and git-diff impact analysis), and separated confidence categories (`certainCallers` vs `possibleCallers`, `affectedTests`, `affectedConfigWiring`, `hasDynamicDispatch`).
+  - `ImpactAnalyzer.kt`:
+    - Transitive caller graph traversal separating `Confidence.CONFIRMED` and `Confidence.POSSIBLE` dependencies.
+    - Configuration wiring attribution resolving beans, configs, and injected properties impacted by symbol changes.
+    - Dynamic dispatch detection flagging reflection or interface polymorphic dispatches.
+    - `analyzeDiff(...)` method computing unified blast radius across multiple modified symbols (e.g. from git diff).
+  - `RuleModel.kt` & `RuleEvaluator.kt`:
+    - Added line number propagation (`Violation.line = edge.line`) to pinpoint offending architectural violations down to source line.
+    - Full package regex matching supporting dotted packages (`dev.repomind.core.*` vs `dev.repomind.cli.*`) alongside simple class names.
+    - Added `failOnViolation: Boolean = false` parameter throwing `ArchitectureRuleViolationException` with detailed violation descriptions.
+  - Architecture Rules Dogfooding:
+    - Added default `.repomind/rules.yaml` ruleset enforcing boundaries: core must not depend on apps, model must not depend on infrastructure, controllers must not call repositories directly.
+    - Verified with comprehensive `ArchitectureRulesTest`.

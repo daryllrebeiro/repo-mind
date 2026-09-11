@@ -31,7 +31,12 @@ data class Violation(
     val sourceFqn: String,
     val targetFqn: String,
     val edgeKind: String,
+    val line: Int = 0,
 )
+
+class ArchitectureRuleViolationException(val violations: List<Violation>) :
+    RuntimeException("Architecture check failed with ${violations.size} violation(s):\n" +
+        violations.joinToString("\n") { "  - [${it.rule}] ${it.sourceFqn} (${if (it.line > 0) "line ${it.line}" else "unspecified"}) -> ${it.targetFqn} [${it.edgeKind}]: ${it.message ?: "Illegal dependency"}" })
 
 @Serializable
 data class RulesReport(
@@ -39,6 +44,8 @@ data class RulesReport(
     val violations: List<Violation>,
     val checkedTypes: Int,
 ) {
+    val passed: Boolean get() = violations.isEmpty()
+
     fun violationsBy(symbolFqn: String): List<Violation> =
         violations.filter { it.sourceFqn.substringBefore('#') == symbolFqn }
 }

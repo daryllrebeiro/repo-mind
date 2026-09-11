@@ -30,6 +30,21 @@ data class ImpactWeights(
 )
 
 @Serializable
+data class BlastRadius(
+    val affectedMethods: Int,
+    val affectedClasses: Int,
+    val affectedTests: Int,
+    val affectedModules: Int,
+)
+
+@Serializable
+data class ConfigWiringInfo(
+    val kind: String,
+    val targetFqn: String,
+    val propertyKey: String,
+)
+
+@Serializable
 data class ImpactReport(
     val symbol: String,
     val score: Int,
@@ -41,4 +56,22 @@ data class ImpactReport(
     val affectedTestCount: Int,
     val topCallers: List<String>,
     val truncatedCallers: Boolean,
+    val certainCallers: List<String> = emptyList(),
+    val possibleCallers: List<String> = emptyList(),
+    val affectedTests: List<String> = emptyList(),
+    val affectedConfigWiring: List<String> = emptyList(),
+    val hasDynamicDispatch: Boolean = false,
+    val blastRadius: BlastRadius = BlastRadius(0, 0, 0, 0),
+)
+
+@Serializable
+data class DiffImpactReport(
+    val changedSymbols: List<String>,
+    val maxScore: Int,
+    val highestLevel: String,
+    val blastRadius: BlastRadius,
+    val allCertainCallers: List<String>,
+    val allPossibleCallers: List<String>,
+    val allAffectedTests: List<String>,
+    val perSymbolReports: Map<String, ImpactReport>,
 )

@@ -12,7 +12,8 @@ build/
 .settings/
 
 # RepoMind local state (index, cache)
-.repomind/
+**/.repomind/**
+!**/.repomind/rules.yaml
 
 # OS
 .DS_Store

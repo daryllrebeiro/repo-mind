@@ -1,0 +1,28 @@
+# RepoMind Architecture Rules
+rules:
+  - name: core-must-not-depend-on-apps
+    description: Core library modules must not depend on CLI or MCP app modules
+    from:
+      namePattern: "dev\\.repomind\\.core\\..*"
+    to:
+      namePattern: "dev\\.repomind\\.(cli|mcp).*"
+    message: Core components cannot take dependencies on application layer packages
+    edgeKinds: [CALLS, USES, EXTENDS, IMPLEMENTS]
+
+  - name: model-must-not-depend-on-infrastructure
+    description: Core domain models must stay clean of parser, storage, and CLI dependencies
+    from:
+      namePattern: "dev\\.repomind\\.core\\.model\\..*"
+    to:
+      namePattern: "dev\\.repomind\\.(language|storage|cli|mcp).*"
+    message: Core model definitions must remain independent of infrastructure
+    edgeKinds: [CALLS, USES, EXTENDS, IMPLEMENTS]
+
+  - name: controllers-cannot-access-repositories-directly
+    description: Web and presentation controllers should interact with services rather than repositories
+    from:
+      annotations: [RestController, Controller]
+    to:
+      annotations: [Repository]
+    message: Controllers must access database operations through intermediate service classes
+    edgeKinds: [CALLS, USES]
