@@ -41,6 +41,12 @@ class IncrementalIndexer(private val dbPath: Path) {
                 if (changed) changedModules += module
             }
 
+            val currentModuleNames = scan.modules.map { it.name }.toSet()
+            val deletedModuleNames = knownModules - currentModuleNames
+            for (deletedMod in deletedModuleNames) {
+                db.deleteModule(deletedMod)
+            }
+
             val invalidated = crossModuleInvalidation(db, currentByModule, changedModules)
             val toReindex = (changedModules + invalidated).distinctBy { it.name }
             val fullIndex = db.count() == 0L

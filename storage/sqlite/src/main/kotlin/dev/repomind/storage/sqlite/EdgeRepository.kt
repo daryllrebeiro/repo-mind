@@ -53,18 +53,22 @@ class EdgeRepository(private val connection: Connection) {
         }
     }
 
+    fun deleteModule(moduleName: String) {
+        connection.prepareStatement("DELETE FROM edges WHERE module = ?").use { del ->
+            del.setString(1, moduleName)
+            del.executeUpdate()
+        }
+        connection.prepareStatement("DELETE FROM symbol_references WHERE module = ?").use { del ->
+            del.setString(1, moduleName)
+            del.executeUpdate()
+        }
+    }
+
     fun replaceModule(moduleName: String, edges: List<DependencyEdge>): Int {
         var inserted = 0
         connection.autoCommit = false
         try {
-            connection.prepareStatement("DELETE FROM edges WHERE module = ?").use { del ->
-                del.setString(1, moduleName)
-                del.executeUpdate()
-            }
-            connection.prepareStatement("DELETE FROM symbol_references WHERE module = ?").use { del ->
-                del.setString(1, moduleName)
-                del.executeUpdate()
-            }
+            deleteModule(moduleName)
             val sql = "INSERT INTO edges (module, source_fqn, target_fqn, kind, confidence, line) VALUES (?, ?, ?, ?, ?, ?)"
             val refSql = "INSERT INTO symbol_references (module, source_fqn, target_fqn, kind, confidence, line) VALUES (?, ?, ?, ?, ?, ?)"
             connection.prepareStatement(sql).use { insert ->

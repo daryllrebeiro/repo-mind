@@ -39,6 +39,13 @@ data class EvalReport(
     val macroRecall: Double,
     val totalEdgesEvaluated: Int,
 ) {
+    val passedGate: Boolean get() = macroPrecision >= 0.85 && macroRecall >= 0.90
+
     fun summary(): String =
-        "cases=${caseResults.size} precision=%.3f recall=%.3f edges=%d".format(macroPrecision, macroRecall, totalEdgesEvaluated)
+        "cases=${caseResults.size} precision=%.3f recall=%.3f edges=%d gatePassed=%s".format(
+            macroPrecision,
+            macroRecall,
+            totalEdgesEvaluated,
+            passedGate,
+        )
 }

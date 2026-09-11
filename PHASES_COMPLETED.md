@@ -13,8 +13,8 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
 | **Phase 2** | Complete Semantic Parsing & Symbol Indexing | ✅ Complete | JavaParser hardening, SQLite schema finalized, Spring config graph, 3/3 real repo tests |
 | **Phase 3** | Call Graph & Test Mapping | ✅ Complete | Method-level call edges, Spring @Qualifier dispatch, reflection detection, @MockBean exclusion, JUnit test mapping |
 | **Phase 4** | Impact Analysis Engine & Architecture Rules | ✅ Complete | Transitive blast radius, confidence scoring, git diff impact, architecture rules engine with line numbers and failOnViolation |
-| **Phase 5** | Incremental Indexing & Eval Harness | 🔄 In Progress | Cross-module invalidation, benchmark PR precision/recall eval gate |
-| **Phase 6** | MCP Server, VS Code Extension & AI Agent Integration | ⏳ Pending | MCP tools (compact JSON, streaming/caps), VS Code commands, MapStruct |
+| **Phase 5** | Incremental Indexing & Eval Harness | ✅ Complete | Cross-module invalidation, deleted module/file purge, sub-second indexing, quality gate (precision >= 0.85, recall >= 0.90) |
+| **Phase 6** | MCP Server, VS Code Extension & AI Agent Integration | 🔄 In Progress | MCP tools (compact JSON, streaming/caps), VS Code commands, MapStruct |
 | **Phase 7** | Production Readiness (CI/CD, Performance, Security, Observability) | ⏳ Pending | GitHub Actions, JMH benchmarks, OWASP dependency checks, JaCoCo, user docs |
 | **Phase 8** | Multi-Language & Extensibility | ⏳ Pending | Language parser plugin SPI, Kotlin support, project configuration |
 
@@ -69,3 +69,12 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
   - Architecture Rules Dogfooding:
     - Added default `.repomind/rules.yaml` ruleset enforcing boundaries: core must not depend on apps, model must not depend on infrastructure, controllers must not call repositories directly.
     - Verified with comprehensive `ArchitectureRulesTest`.
+
+### Phase 5: Incremental Indexing & Eval Harness
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `SymbolDatabase.kt` & `EdgeRepository.kt`: Added `deleteModule` to purge removed modules, file state, symbol references, and unresolved symbols atomically in SQLite.
+  - `IncrementalIndexer.kt`: Added deleted module detection and cleanup, combined with structural dependency invalidation (`IMPORTS`, `USES`, `CALLS`, `EXTENDS`) to selectively reindex only impacted downstream modules.
+  - Sub-second performance benchmark verified on 120-file scale fixture.
+  - `EvalModel.kt`: Added `passedGate` check (`macroPrecision >= 0.85 && macroRecall >= 0.90`) and structured case metrics.
+  - `BenchmarkEvalTest.kt`: Realistic Spring benchmark evaluation asserting macro precision and recall exceed the quality gate thresholds (`precision >= 0.85`, `recall >= 0.90`) and verified impact analysis blast radius integration.

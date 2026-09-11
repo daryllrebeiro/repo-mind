@@ -184,6 +184,34 @@ class SymbolDatabase private constructor(private val connection: Connection) : A
             }
         }
 
+    fun deleteModule(moduleName: String) {
+        connection.autoCommit = false
+        try {
+            connection.prepareStatement("DELETE FROM symbols WHERE module = ?").use {
+                it.setString(1, moduleName); it.executeUpdate()
+            }
+            connection.prepareStatement("DELETE FROM unresolved_symbols WHERE module = ?").use {
+                it.setString(1, moduleName); it.executeUpdate()
+            }
+            connection.prepareStatement("DELETE FROM file_state WHERE module = ?").use {
+                it.setString(1, moduleName); it.executeUpdate()
+            }
+            connection.prepareStatement("DELETE FROM files WHERE module = ?").use {
+                it.setString(1, moduleName); it.executeUpdate()
+            }
+            connection.prepareStatement("DELETE FROM modules WHERE name = ?").use {
+                it.setString(1, moduleName); it.executeUpdate()
+            }
+            edges.deleteModule(moduleName)
+            connection.commit()
+        } catch (e: Exception) {
+            connection.rollback()
+            throw e
+        } finally {
+            connection.autoCommit = true
+        }
+    }
+
     fun replaceModule(moduleName: String, parse: ModuleParse): Int {
         var inserted = 0
         connection.autoCommit = false
