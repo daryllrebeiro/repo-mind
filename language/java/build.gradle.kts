@@ -6,6 +6,7 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:classpath"))
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.core)
     api(libs.javaparser.core)
     api(libs.javaparser.symbol.solver.core)
     testImplementation(libs.junit.jupiter)

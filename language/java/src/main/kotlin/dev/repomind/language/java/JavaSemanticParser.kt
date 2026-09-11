@@ -1,7 +1,15 @@
 package dev.repomind.language.java
 
+import com.github.javaparser.JavaParser
 import com.github.javaparser.ParserConfiguration
 import com.github.javaparser.StaticJavaParser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import com.github.javaparser.ast.Modifier
 import com.github.javaparser.ast.body.AnnotationDeclaration
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration
@@ -37,12 +45,102 @@ class JavaSemanticParser : LanguageParser {
     override val languageId: String = "java"
     override val supportedExtensions: Set<String> = setOf("java")
 
+    var defaultThreads: Int = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+
     override fun parseModule(module: RepoModule, classpath: List<Path>): ModuleParse {
+        return runBlocking {
+            parseModuleConcurrent(module, classpath, defaultThreads)
+        }
+    }
+
+    fun parseModuleConcurrentBlocking(
+        module: RepoModule,
+        classpath: List<Path>,
+        threads: Int = defaultThreads,
+    ): ModuleParse = runBlocking {
+        parseModuleConcurrent(module, classpath, threads)
+    }
+
+    suspend fun parseModuleConcurrent(
+        module: RepoModule,
+        classpath: List<Path>,
+        threads: Int = defaultThreads,
+    ): ModuleParse = coroutineScope {
         val config = ParserConfiguration()
         val typeSolver = buildTypeSolver(module.sourceRoots, classpath)
         config.setSymbolResolver(JavaSymbolSolver(typeSolver))
-        StaticJavaParser.setConfiguration(config)
-        JavaParserFacade.clearInstances()
+
+        val allFiles = module.sourceRoots.flatMap { root ->
+            listJavaFiles(root.path).map { root to it }
+        }
+
+        val workerCount = threads.coerceAtLeast(1).coerceAtMost(allFiles.size.coerceAtLeast(1))
+        val fileChannel = Channel<Pair<SourceRoot, Path>>(capacity = 64)
+
+        launch {
+            for (item in allFiles) {
+                fileChannel.send(item)
+            }
+            fileChannel.close()
+        }
+
+        val workerResults = (1..workerCount).map {
+            async {
+                val localParser = JavaParser(config)
+                val localTypes = mutableListOf<ParsedType>()
+                val localUnresolved = mutableListOf<UnresolvedSymbol>()
+                val localImports = mutableMapOf<String, List<Pair<String, Int>>>()
+                val localCus = mutableMapOf<String, Pair<com.github.javaparser.ast.CompilationUnit, TypeDeclaration<*>>>()
+                val localFiles = mutableMapOf<String, Path>()
+
+                for ((sourceRoot, file) in fileChannel) {
+                    try {
+                        val parseResult = localParser.parse(file)
+                        if (!parseResult.isSuccessful || parseResult.result.isEmpty) {
+                            localUnresolved += UnresolvedSymbol(
+                                symbol = "<parse-error>",
+                                filePath = file.toString(),
+                                line = 0,
+                                reason = parseResult.problems.joinToString("; ") { it.message },
+                            )
+                            continue
+                        }
+                        val cu = parseResult.result.get()
+                        val pkg = cu.packageDeclaration.map { it.nameAsString }.orElse("")
+                        val imports = cu.imports
+                            .filter { !it.isStatic && !it.isAsterisk }
+                            .map { it.name.asString() to it.range.map { r -> r.begin.line }.orElse(0) }
+                        for (typeDecl in cu.types) {
+                            try {
+                                extractType(typeDecl, pkg, file, localUnresolved, sourceRoot.isTest)?.let { parsed ->
+                                    localTypes += parsed
+                                    if (imports.isNotEmpty()) {
+                                        localImports[parsed.fqn] = imports
+                                    }
+                                    localCus[parsed.fqn] = cu to typeDecl
+                                    localFiles[parsed.fqn] = file
+                                }
+                            } catch (e: Exception) {
+                                localUnresolved += UnresolvedSymbol(
+                                    symbol = typeDecl.nameAsString,
+                                    filePath = file.toString(),
+                                    line = typeDecl.range.map { r -> r.begin.line }.orElse(0),
+                                    reason = "${e.javaClass.simpleName}: ${e.message}",
+                                )
+                            }
+                        }
+                    } catch (e: Exception) {
+                        localUnresolved += UnresolvedSymbol(
+                            symbol = "<parse-error: ${e.javaClass.simpleName}>",
+                            filePath = file.toString(),
+                            line = 0,
+                            reason = e.message ?: e.javaClass.name,
+                        )
+                    }
+                }
+                WorkerParseResult(localTypes, localUnresolved, localImports, localCus, localFiles)
+            }
+        }.awaitAll()
 
         val types = mutableListOf<ParsedType>()
         val unresolved = mutableListOf<UnresolvedSymbol>()
@@ -50,43 +148,15 @@ class JavaSemanticParser : LanguageParser {
         val cusByType = mutableMapOf<String, Pair<com.github.javaparser.ast.CompilationUnit, TypeDeclaration<*>>>()
         val filesByType = mutableMapOf<String, Path>()
 
-        for (sourceRoot in module.sourceRoots) {
-            for (file in listJavaFiles(sourceRoot.path)) {
-                try {
-                    val cu = StaticJavaParser.parse(file)
-                    val pkg = cu.packageDeclaration.map { it.nameAsString }.orElse("")
-                    val imports = cu.imports
-                        .filter { !it.isStatic && !it.isAsterisk }
-                        .map { it.name.asString() to it.range.map { r -> r.begin.line }.orElse(0) }
-                    for (typeDecl in cu.types) {
-                        try {
-                            extractType(typeDecl, pkg, file, unresolved, sourceRoot.isTest)?.let { parsed ->
-                                types += parsed
-                                if (imports.isNotEmpty()) {
-                                    importsByType[parsed.fqn] = imports
-                                }
-                                cusByType[parsed.fqn] = cu to typeDecl
-                                filesByType[parsed.fqn] = file
-                            }
-                        } catch (e: Exception) {
-                            unresolved += UnresolvedSymbol(
-                                symbol = typeDecl.nameAsString,
-                                filePath = file.toString(),
-                                line = typeDecl.range.map { r -> r.begin.line }.orElse(0),
-                                reason = "${e.javaClass.simpleName}: ${e.message}",
-                            )
-                        }
-                    }
-                } catch (e: Exception) {
-                    unresolved += UnresolvedSymbol(
-                        symbol = "<parse-error: ${e.javaClass.simpleName}>",
-                        filePath = file.toString(),
-                        line = 0,
-                        reason = e.message ?: e.javaClass.name,
-                    )
-                }
-            }
+        for (res in workerResults) {
+            types += res.types
+            unresolved += res.unresolved
+            importsByType.putAll(res.imports)
+            cusByType.putAll(res.cus)
+            filesByType.putAll(res.files)
         }
+
+        types.sortBy { it.fqn }
 
         val edges = buildEdges(types, importsByType).toMutableList()
         edges += extractCalls(typeSolver, types, cusByType, filesByType, unresolved)
@@ -98,13 +168,15 @@ class JavaSemanticParser : LanguageParser {
                 group.sortedWith(
                     compareByDescending<DependencyEdge> { it.confidence == Confidence.CONFIRMED }
                         .thenByDescending { it.callerMember != null }
+                        .thenBy { it.line }
                 ).first()
             }
+            .sortedWith(compareBy({ it.sourceFqn }, { it.targetFqn }, { it.kind }, { it.line }))
 
-        return ModuleParse(
+        ModuleParse(
             moduleName = module.name,
             types = types,
-            unresolvedSymbols = unresolved.distinctBy { Triple(it.symbol, it.filePath, it.line) },
+            unresolvedSymbols = unresolved.distinctBy { Triple(it.symbol, it.filePath, it.line) }.sortedBy { "${it.filePath}:${it.line}:${it.symbol}" },
             edges = deduped,
         )
     }
@@ -671,3 +743,11 @@ class JavaSemanticParser : LanguageParser {
         }
     }
 }
+
+private data class WorkerParseResult(
+    val types: List<ParsedType>,
+    val unresolved: List<UnresolvedSymbol>,
+    val imports: Map<String, List<Pair<String, Int>>>,
+    val cus: Map<String, Pair<com.github.javaparser.ast.CompilationUnit, TypeDeclaration<*>>>,
+    val files: Map<String, Path>,
+)

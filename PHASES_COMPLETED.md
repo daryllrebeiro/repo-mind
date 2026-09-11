@@ -123,3 +123,21 @@ Tracking the completion status of all phases as outlined in the RepoMind Phase-B
     - Added `MultiLanguageParserTest` verifying Java and Kotlin parser dispatch and AST extraction.
     - Added `RepoMindConfigTest` verifying YAML project configuration loading and fallback defaults.
     - Full clean build across all modules with 86 Gradle test tasks passing.
+
+---
+
+### Roadmap Phase 1: Stabilization & Core Engine Hardening
+#### Task 1.2: Multi-Core Parallel AST Parsing Engine
+- **Date Completed**: September 11, 2026
+- **Key Changes**:
+  - `libs.versions.toml` & `language/java/build.gradle.kts`: Added `kotlinx-coroutines-core` dependency.
+  - `JavaSemanticParser.kt`:
+    - Refactored `parseModuleConcurrent` into a `suspend` function backed by Kotlin Coroutines (`coroutineScope`, bounded `Channel` file distribution, and concurrent `async` worker pools).
+    - Added thread-safe AST extraction across multiple CPU cores while keeping method call extraction deterministic.
+    - Exposed `parseModuleConcurrentBlocking` and updated SPI `parseModule` to run with `defaultThreads` (`Runtime.getRuntime().availableProcessors()`).
+    - Eliminated nested `runBlocking` calls and thread starvation hazards on `Dispatchers.Default`.
+  - `ConcurrentParsingTest.kt`:
+    - Added race detector test suite asserting identical FQN, edge, and unresolved symbol output between single-threaded and concurrent runs.
+    - Verified synchronous SPI delegation.
+  - Full project test suite and static analysis (`./gradlew test detekt ktlintCheck`) fully passing (86 actionable tasks, 0 failures).
+
