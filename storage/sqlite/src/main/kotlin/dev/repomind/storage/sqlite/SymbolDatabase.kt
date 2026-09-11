@@ -383,6 +383,20 @@ class SymbolDatabase private constructor(
     fun findByModule(moduleName: String): List<SymbolRow> =
         query("SELECT $COLUMNS FROM symbols WHERE module = ? ORDER BY qualified_name", moduleName)
 
+    fun findByFilePath(filePath: String): List<SymbolRow> {
+        val forward = filePath.replace('\\', '/')
+        val backward = filePath.replace('/', '\\')
+        val fileName = filePath.substringAfterLast('/').substringAfterLast('\\')
+        return query(
+            "SELECT $COLUMNS FROM symbols WHERE file_path = ? OR file_path = ? OR file_path LIKE ? OR file_path LIKE ? OR file_path LIKE ? ORDER BY line_start",
+            forward,
+            backward,
+            "%$forward",
+            "%$backward",
+            "%$fileName",
+        )
+    }
+
     fun allTypes(): List<SymbolRow> =
         query("SELECT $COLUMNS FROM symbols WHERE kind NOT IN ('METHOD', 'FIELD') ORDER BY qualified_name")
 

@@ -55,6 +55,7 @@ import kotlin.system.exitProcess
         ReportCommand::class,
         WatchCommand::class,
         InitCommand::class,
+        LspCommand::class,
     ],
 )
 class RepomindCli : Runnable {
@@ -682,6 +683,28 @@ class ReportCommand : Runnable {
 
 @Serializable
 data class ReportResultDto(val path: String, val bytes: Int)
+
+@Command(
+    name = "lsp",
+    description = ["Start Language Server Protocol (LSP) daemon for IDE integration (VS Code, Neovim)."],
+)
+class LspCommand : Runnable {
+    @Parameters(index = "0", description = ["Repository root directory"], arity = "0..1")
+    var root: Path? = null
+
+    @picocli.CommandLine.Option(names = ["--port"], description = ["Run LSP over TCP socket instead of stdio"])
+    var port: Int = 0
+
+    override fun run() {
+        val repoRoot = (root ?: Path.of(".")).toAbsolutePath().normalize()
+        val server = dev.repomind.cli.lsp.RepoMindLspServer(repoRoot)
+        if (port > 0) {
+            server.startSocket(port)
+        } else {
+            server.startStdio()
+        }
+    }
+}
 
 fun main(args: Array<String>) {
     exitProcess(CommandLine(RepomindCli()).execute(*args))

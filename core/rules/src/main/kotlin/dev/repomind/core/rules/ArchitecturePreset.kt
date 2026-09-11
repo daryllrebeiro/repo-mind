@@ -79,7 +79,7 @@ enum class ArchitecturePreset(val id: String, val displayName: String, val descr
                     RuleDef(
                         name = "three-tier-repo-isolation",
                         description = "Repositories must not depend on Service or Presentation layers",
-                        from = Stereotype(namePattern = "${prefix}(repository|repositories|dao|persistence)(\\..*)?"),
+                        from = Stereotype(namePattern = "${prefix}(repository|repositories|repo|dao|persistence)(\\..*)?"),
                         to = Stereotype(namePattern = "${prefix}(service|services|controller|controllers|web|api)(\\..*)?"),
                         message = "Data access layer must not depend on higher-level service or presentation layers",
                     ),
@@ -94,7 +94,7 @@ enum class ArchitecturePreset(val id: String, val displayName: String, val descr
                         name = "three-tier-controller-to-repo-bypass",
                         description = "Controllers must not bypass services to call repositories directly",
                         from = Stereotype(namePattern = "${prefix}(controller|controllers|web|api)(\\..*)?"),
-                        to = Stereotype(namePattern = "${prefix}(repository|repositories|dao|persistence)(\\..*)?"),
+                        to = Stereotype(namePattern = "${prefix}(repository|repositories|repo|dao|persistence)(\\..*)?"),
                         message = "Presentation layer should delegate to service layer rather than calling repositories directly",
                     ),
                 )
