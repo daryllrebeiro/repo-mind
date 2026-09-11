@@ -124,4 +124,32 @@ class CliCommandsTest {
         assertTrue(firstContent.contains("## Context"))
         assertTrue(firstContent.contains("## RepoMind Architecture Rule"))
     }
+
+    @Test
+    fun `deprecations command scans deprecated symbols and generates report`() {
+        val root = createSampleProject()
+        val legacyDir = root.resolve("src/main/java/com/sample/legacy")
+        Files.createDirectories(legacyDir)
+        legacyDir.resolve("OldEngine.java").writeText(
+            """
+            package com.sample.legacy;
+            @Deprecated
+            public class OldEngine {
+                public void start() {}
+            }
+            """.trimIndent(),
+        )
+
+        IncrementalIndexer(root.resolve(".repomind/index.db")).update(root)
+
+        val cmd = CommandLine(RepomindCli())
+        val outReport = root.resolve("reports/deprecations.md")
+        val exitCode = cmd.execute("deprecations", root.toString(), "--output=" + outReport.toString(), "--json")
+        assertEquals(0, exitCode)
+
+        assertTrue(Files.isRegularFile(outReport))
+        val reportContent = Files.readString(outReport)
+        assertTrue(reportContent.contains("# RepoMind Deprecation Radar & Semantic Drift Report"))
+        assertTrue(reportContent.contains("com.sample.legacy.OldEngine"))
+    }
 }

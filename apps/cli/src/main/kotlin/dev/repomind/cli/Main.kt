@@ -56,6 +56,7 @@ import kotlin.system.exitProcess
         WatchCommand::class,
         InitCommand::class,
         LspCommand::class,
+        DeprecationsCommand::class,
     ],
 )
 class RepomindCli : Runnable {
@@ -702,6 +703,61 @@ class LspCommand : Runnable {
             server.startSocket(port)
         } else {
             server.startStdio()
+        }
+    }
+}
+
+@Command(
+    name = "deprecations",
+    aliases = ["radar"],
+    description = ["Scan for @Deprecated symbols, calculate blast radius debt, and suggest migration paths."],
+)
+class DeprecationsCommand : Runnable {
+    @Parameters(index = "0", description = ["Repository root directory"])
+    lateinit var root: Path
+
+    @picocli.CommandLine.Option(names = ["-o", "--output"], description = ["Output markdown path for deprecation report"])
+    var output: Path? = null
+
+    @picocli.CommandLine.Option(names = ["--json"], description = ["Output report as JSON"])
+    var jsonOutput: Boolean = false
+
+    override fun run() {
+        val normalizedRoot = root.toAbsolutePath().normalize()
+        val dbPath = normalizedRoot.resolve(".repomind/index.db")
+        if (!java.nio.file.Files.isRegularFile(dbPath)) {
+            System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
+            kotlin.system.exitProcess(1)
+        }
+
+        SymbolDatabase.open(dbPath).use { db ->
+            val deprecatedRows = db.findDeprecatedSymbols()
+            val candidates = deprecatedRows.map {
+                dev.repomind.core.impact.DeprecatedSymbolCandidate(
+                    fqn = it.qualifiedName,
+                    kind = it.kind,
+                    module = it.module,
+                    filePath = it.filePath,
+                    line = it.lineStart,
+                    annotations = it.annotations,
+                )
+            }
+
+            val radar = dev.repomind.core.impact.DeprecationRadar(db.graphStore)
+            val report = radar.scan(candidates)
+
+            if (output != null) {
+                val targetPath = if (output!!.isAbsolute) output!! else normalizedRoot.resolve(output!!)
+                java.nio.file.Files.createDirectories(targetPath.toAbsolutePath().parent)
+                java.nio.file.Files.writeString(targetPath, report.toMarkdown())
+                System.err.println("Deprecation report written to $targetPath")
+            }
+
+            if (jsonOutput) {
+                println(Json.encodeToString(dev.repomind.core.impact.DeprecationRadarReport.serializer(), report))
+            } else if (output == null) {
+                println(report.toMarkdown())
+            }
         }
     }
 }

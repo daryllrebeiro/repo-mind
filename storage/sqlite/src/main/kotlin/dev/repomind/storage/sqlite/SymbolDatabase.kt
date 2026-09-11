@@ -400,6 +400,9 @@ class SymbolDatabase private constructor(
     fun allTypes(): List<SymbolRow> =
         query("SELECT $COLUMNS FROM symbols WHERE kind NOT IN ('METHOD', 'FIELD') ORDER BY qualified_name")
 
+    fun findDeprecatedSymbols(): List<SymbolRow> =
+        query("SELECT $COLUMNS FROM symbols WHERE annotations LIKE '%Deprecated%' ORDER BY qualified_name")
+
     fun count(): Long =
         connection.createStatement().use { stmt ->
             stmt.executeQuery("SELECT COUNT(*) FROM symbols").use { rs ->
