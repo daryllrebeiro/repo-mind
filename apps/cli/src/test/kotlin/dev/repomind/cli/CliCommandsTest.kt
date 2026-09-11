@@ -9,6 +9,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.writeText
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class CliCommandsTest {
@@ -151,5 +152,35 @@ class CliCommandsTest {
         val reportContent = Files.readString(outReport)
         assertTrue(reportContent.contains("# RepoMind Deprecation Radar & Semantic Drift Report"))
         assertTrue(reportContent.contains("com.sample.legacy.OldEngine"))
+    }
+
+    @Test
+    fun `refactor command detects dead code and applies modifications with lexical preservation`() {
+        val root = createSampleProject()
+        val serviceFile = root.resolve("src/main/java/com/sample/service/SampleService.java")
+        serviceFile.writeText(
+            """
+            package com.sample.service;
+            public class SampleService {
+                public String run() { return "ok"; }
+                private void deadMethod() { System.out.println("dead"); }
+            }
+            """.trimIndent(),
+        )
+
+        IncrementalIndexer(root.resolve(".repomind/index.db")).update(root)
+
+        val cmd = CommandLine(RepomindCli())
+        // 1. Dry run
+        val exitCodeDry = cmd.execute("refactor", root.toString(), "--dead-code")
+        assertEquals(0, exitCodeDry)
+        assertTrue(Files.readString(serviceFile).contains("deadMethod"), "Dry run must not modify file")
+
+        // 2. Apply
+        val exitCodeApply = cmd.execute("refactor", root.toString(), "--dead-code", "--apply", "--create-pr")
+        assertEquals(0, exitCodeApply)
+        val modified = Files.readString(serviceFile)
+        assertFalse(modified.contains("deadMethod"), "Applied refactoring must remove dead method")
+        assertTrue(modified.contains("public String run()"), "Active method must be preserved")
     }
 }

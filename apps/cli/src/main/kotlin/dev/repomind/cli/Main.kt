@@ -57,6 +57,7 @@ import kotlin.system.exitProcess
         InitCommand::class,
         LspCommand::class,
         DeprecationsCommand::class,
+        RefactorCommand::class,
     ],
 )
 class RepomindCli : Runnable {
@@ -757,6 +758,152 @@ class DeprecationsCommand : Runnable {
                 println(Json.encodeToString(dev.repomind.core.impact.DeprecationRadarReport.serializer(), report))
             } else if (output == null) {
                 println(report.toMarkdown())
+            }
+        }
+    }
+}
+
+@Command(
+    name = "refactor",
+    description = ["Automated architectural refactoring engine (dead code removal, deprecated method migration)."],
+)
+class RefactorCommand : Runnable {
+    @Parameters(index = "0", description = ["Repository root directory"])
+    lateinit var root: Path
+
+    @picocli.CommandLine.Option(names = ["--dead-code"], description = ["Detect and remove unused private methods with 0 callers"])
+    var deadCode: Boolean = false
+
+    @picocli.CommandLine.Option(names = ["--migrate-deprecated"], description = ["Auto-rewrite calls to deprecated methods with recommended replacements"])
+    var migrateDeprecated: Boolean = false
+
+    @picocli.CommandLine.Option(names = ["--apply"], description = ["Apply changes to disk (default is dry-run diff preview)"])
+    var apply: Boolean = false
+
+    @picocli.CommandLine.Option(names = ["--create-pr"], description = ["Print GitHub PR creation command template"])
+    var createPr: Boolean = false
+
+    override fun run() {
+        val normalizedRoot = root.toAbsolutePath().normalize()
+        val dbPath = normalizedRoot.resolve(".repomind/index.db")
+        if (!java.nio.file.Files.isRegularFile(dbPath)) {
+            System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
+            kotlin.system.exitProcess(1)
+        }
+
+        SymbolDatabase.open(dbPath).use { db ->
+            val fileDiffs = mutableListOf<dev.repomind.language.java.refactor.FileDiff>()
+            var totalTransformations = 0
+
+            // 1. Dead code removal
+            if (deadCode) {
+                val allSymbols = db.allTypes().flatMap { t -> db.findByFilePath(t.filePath ?: "") }
+                val privateMethodsByFile = allSymbols.filter { it.kind == "METHOD" && it.visibility == "PRIVATE" && !it.filePath.isNullOrBlank() }
+                    .groupBy { it.filePath!! }
+
+                for ((filePathStr, methods) in privateMethodsByFile) {
+                    val deadMethodNames = methods.filter { m ->
+                        val callers = db.edges.findDirectCallers(m.qualifiedName)
+                        callers.isEmpty()
+                    }.map { it.name }.toSet()
+
+                    if (deadMethodNames.isNotEmpty()) {
+                        val filePath = Path.of(filePathStr)
+                        if (java.nio.file.Files.isRegularFile(filePath)) {
+                            val original = java.nio.file.Files.readString(filePath)
+                            val (modified, removed) = dev.repomind.language.java.refactor.AstRefactoringEngine.removeDeadMethods(original, deadMethodNames)
+                            if (removed.isNotEmpty()) {
+                                totalTransformations += removed.size
+                                val diff = dev.repomind.language.java.refactor.AstRefactoringEngine.generateUnifiedDiff(filePathStr, original, modified)
+                                fileDiffs.add(
+                                    dev.repomind.language.java.refactor.FileDiff(
+                                        filePath = filePathStr,
+                                        originalContent = original,
+                                        modifiedContent = modified,
+                                        diffUnified = diff,
+                                        transformationsApplied = removed.map { "Removed dead method: $it" },
+                                    )
+                                )
+                                if (apply) {
+                                    java.nio.file.Files.writeString(filePath, modified)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Migrate deprecated methods
+            if (migrateDeprecated) {
+                val deprecatedSymbols = db.findDeprecatedSymbols()
+                val candidates = deprecatedSymbols.map {
+                    dev.repomind.core.impact.DeprecatedSymbolCandidate(
+                        fqn = it.qualifiedName,
+                        kind = it.kind,
+                        module = it.module,
+                        filePath = it.filePath,
+                        line = it.lineStart,
+                        annotations = it.annotations,
+                    )
+                }
+                val radar = dev.repomind.core.impact.DeprecationRadar(db.graphStore)
+                val report = radar.scan(candidates)
+
+                for (item in report.items) {
+                    val replacement = item.replacementHint ?: continue
+                    val oldMethodName = item.fqn.substringAfter('#')
+                    val newMethodName = replacement.substringAfter('#')
+                    if (oldMethodName.isNotBlank() && newMethodName.isNotBlank() && oldMethodName != newMethodName) {
+                        for (callerFqn in item.directCallers) {
+                            val callerType = callerFqn.substringBefore('#')
+                            val callerRows = db.findByFqn(callerType)
+                            val callerFile = callerRows.firstOrNull()?.filePath
+                            if (callerFile != null) {
+                                val path = Path.of(callerFile)
+                                if (java.nio.file.Files.isRegularFile(path)) {
+                                    val original = java.nio.file.Files.readString(path)
+                                    val (modified, count) = dev.repomind.language.java.refactor.AstRefactoringEngine.replaceMethodCalls(original, oldMethodName, newMethodName)
+                                    if (count > 0) {
+                                        totalTransformations += count
+                                        val diff = dev.repomind.language.java.refactor.AstRefactoringEngine.generateUnifiedDiff(callerFile, original, modified)
+                                        fileDiffs.add(
+                                            dev.repomind.language.java.refactor.FileDiff(
+                                                filePath = callerFile,
+                                                originalContent = original,
+                                                modifiedContent = modified,
+                                                diffUnified = diff,
+                                                transformationsApplied = listOf("Replaced $count call(s) from $oldMethodName to $newMethodName"),
+                                            )
+                                        )
+                                        if (apply) {
+                                            java.nio.file.Files.writeString(path, modified)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            val result = dev.repomind.language.java.refactor.RefactoringResult(
+                totalFilesChanged = fileDiffs.size,
+                totalTransformations = totalTransformations,
+                fileDiffs = fileDiffs,
+                appliedToDisk = apply,
+            )
+
+            if (!apply) {
+                for (d in fileDiffs) {
+                    println(d.diffUnified)
+                }
+                System.err.println("Dry-run preview: ${result.totalTransformations} transformation(s) across ${result.totalFilesChanged} file(s). Run with --apply to write changes.")
+            } else {
+                System.err.println("Applied ${result.totalTransformations} transformation(s) across ${result.totalFilesChanged} file(s).")
+            }
+
+            if (createPr) {
+                println("gh pr create --title \"refactor: automated architectural refactoring via RepoMind\" --body \"Applied ${result.totalTransformations} transformation(s) across ${result.totalFilesChanged} file(s).\"")
             }
         }
     }
