@@ -8,6 +8,8 @@ dependencies {
     testImplementation(project(":core:classpath"))
     testImplementation(project(":core:config"))
     testImplementation(project(":core:index"))
+    testImplementation(project(":core:query"))
+    testImplementation(project(":core:impact"))
     testImplementation(project(":language:java"))
     testImplementation(project(":storage:sqlite"))
     testImplementation(libs.junit.jupiter)
