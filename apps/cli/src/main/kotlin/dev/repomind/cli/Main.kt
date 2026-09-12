@@ -60,6 +60,7 @@ import kotlin.system.exitProcess
         DeprecationsCommand::class,
         RefactorCommand::class,
         FederateCommand::class,
+        RagExportCommand::class,
     ],
 )
 class RepomindCli : Runnable {
@@ -1003,6 +1004,44 @@ class FederateCommand : Runnable {
             } else {
                 println(markdown)
             }
+        }
+    }
+}
+
+@Command(
+    name = "rag-export",
+    description = ["Export hybrid Graph-RAG embeddings and call graph topology for AI agent vector search."],
+)
+class RagExportCommand : Runnable {
+    @Parameters(index = "0", description = ["Repository root directory"])
+    lateinit var root: Path
+
+    @Option(names = ["--output", "-o"], description = ["Output JSON file path for Graph-RAG documents"])
+    var output: Path? = null
+
+    @Option(names = ["--dimensions", "-d"], description = ["Embedding dimensions (default: 64)"])
+    var dimensions: Int = 64
+
+    @Option(names = ["--persist"], description = ["Persist embeddings into SQLite symbol_embeddings table"])
+    var persist: Boolean = true
+
+    override fun run() {
+        val repoRoot = dev.repomind.core.model.PathGuard.requireDirectory(root)
+        val dbPath = repoRoot.resolve(".repomind/index.db")
+        if (!java.nio.file.Files.isRegularFile(dbPath)) {
+            System.err.println("Index database not found at $dbPath. Run 'repomind index' first.")
+            return
+        }
+
+        SymbolDatabase.open(dbPath).use { db ->
+            val exporter = dev.repomind.core.report.GraphRagExporter(dimensions = dimensions)
+            val result = exporter.export(db, outputFile = output, persistToDb = persist)
+            println(
+                Json.encodeToString(
+                    dev.repomind.core.report.GraphRagExportResult.serializer(),
+                    result,
+                ),
+            )
         }
     }
 }

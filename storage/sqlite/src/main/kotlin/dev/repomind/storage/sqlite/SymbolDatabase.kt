@@ -32,6 +32,17 @@ data class ConfidenceReport(
     val confidenceRate: Double,
 )
 
+data class SymbolEmbeddingRow(
+    val symbolFqn: String,
+    val module: String,
+    val kind: String,
+    val summaryText: String,
+    val docstring: String? = null,
+    val embedding: List<Float>,
+    val dimensions: Int,
+    val updatedAt: Long,
+)
+
 class SymbolDatabase private constructor(
     private val connection: Connection,
     val readOnly: Boolean = false,
@@ -132,6 +143,22 @@ class SymbolDatabase private constructor(
                 )
                 """.trimIndent(),
             )
+
+            stmt.executeUpdate(
+                """
+                CREATE TABLE IF NOT EXISTS symbol_embeddings (
+                    symbol_fqn TEXT PRIMARY KEY,
+                    module TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    summary_text TEXT NOT NULL,
+                    docstring TEXT,
+                    embedding_json TEXT NOT NULL,
+                    dimensions INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+                """.trimIndent(),
+            )
+            stmt.executeUpdate("CREATE INDEX IF NOT EXISTS idx_embeddings_module ON symbol_embeddings(module)")
         }
         edges.init()
     }
@@ -472,6 +499,71 @@ class SymbolDatabase private constructor(
                 }
             }
         }
+
+    fun recordEmbeddings(embeddings: List<SymbolEmbeddingRow>) = withWriteLock {
+        if (embeddings.isEmpty()) return@withWriteLock
+        val sql = """
+            INSERT OR REPLACE INTO symbol_embeddings (
+                symbol_fqn, module, kind, summary_text, docstring, embedding_json, dimensions, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """.trimIndent()
+        connection.autoCommit = false
+        try {
+            connection.prepareStatement(sql).use { ps ->
+                for (e in embeddings) {
+                    ps.setString(1, e.symbolFqn)
+                    ps.setString(2, e.module)
+                    ps.setString(3, e.kind)
+                    ps.setString(4, e.summaryText)
+                    if (e.docstring == null) ps.setNull(5, java.sql.Types.VARCHAR) else ps.setString(5, e.docstring)
+                    ps.setString(6, e.embedding.joinToString(",", "[", "]"))
+                    ps.setInt(7, e.dimensions)
+                    ps.setLong(8, e.updatedAt)
+                    ps.addBatch()
+                }
+                ps.executeBatch()
+            }
+            connection.commit()
+        } catch (e: Exception) {
+            connection.rollback()
+            throw e
+        } finally {
+            connection.autoCommit = true
+        }
+    }
+
+    fun findEmbedding(symbolFqn: String): SymbolEmbeddingRow? =
+        connection.prepareStatement("SELECT * FROM symbol_embeddings WHERE symbol_fqn = ?").use { ps ->
+            ps.setString(1, symbolFqn)
+            ps.executeQuery().use { rs ->
+                if (rs.next()) parseEmbeddingRow(rs) else null
+            }
+        }
+
+    fun allEmbeddings(): List<SymbolEmbeddingRow> =
+        connection.createStatement().use { stmt ->
+            stmt.executeQuery("SELECT * FROM symbol_embeddings ORDER BY symbol_fqn").use { rs ->
+                buildList {
+                    while (rs.next()) add(parseEmbeddingRow(rs))
+                }
+            }
+        }
+
+    private fun parseEmbeddingRow(rs: java.sql.ResultSet): SymbolEmbeddingRow {
+        val rawJson = rs.getString("embedding_json")
+        val floats = rawJson.removeSurrounding("[", "]").split(",")
+            .mapNotNull { it.trim().toFloatOrNull() }
+        return SymbolEmbeddingRow(
+            symbolFqn = rs.getString("symbol_fqn"),
+            module = rs.getString("module"),
+            kind = rs.getString("kind"),
+            summaryText = rs.getString("summary_text"),
+            docstring = rs.getString("docstring"),
+            embedding = floats,
+            dimensions = rs.getInt("dimensions"),
+            updatedAt = rs.getLong("updated_at"),
+        )
+    }
 
     override fun close() {
         connection.close()
