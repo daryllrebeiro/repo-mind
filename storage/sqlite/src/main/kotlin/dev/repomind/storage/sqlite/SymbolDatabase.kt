@@ -40,6 +40,17 @@ class SymbolDatabase private constructor(
     val edges: EdgeRepository = EdgeRepository(connection)
     val graphStore: dev.repomind.core.graph.GraphStore get() = edges
 
+    private val writeLock = java.util.concurrent.locks.ReentrantLock()
+
+    fun <T> withWriteLock(action: () -> T): T {
+        writeLock.lock()
+        try {
+            return action()
+        } finally {
+            writeLock.unlock()
+        }
+    }
+
     init {
         if (!readOnly) {
             connection.createStatement().use { stmt ->
@@ -141,7 +152,7 @@ class SymbolDatabase private constructor(
             }
         }
 
-    fun setFileStates(moduleName: String, states: Map<String, String>) {
+    fun setFileStates(moduleName: String, states: Map<String, String>) = withWriteLock {
         val now = System.currentTimeMillis()
         connection.autoCommit = false
         try {
@@ -190,7 +201,7 @@ class SymbolDatabase private constructor(
             }
         }
 
-    fun deleteModule(moduleName: String) {
+    fun deleteModule(moduleName: String) = withWriteLock {
         connection.autoCommit = false
         try {
             connection.prepareStatement("DELETE FROM symbols WHERE module = ?").use {
@@ -218,7 +229,7 @@ class SymbolDatabase private constructor(
         }
     }
 
-    fun replaceModule(moduleName: String, parse: ModuleParse): Int {
+    fun replaceModule(moduleName: String, parse: ModuleParse): Int = withWriteLock {
         var inserted = 0
         connection.autoCommit = false
         try {
@@ -273,7 +284,7 @@ class SymbolDatabase private constructor(
         } finally {
             connection.autoCommit = true
         }
-        return inserted
+        inserted
     }
 
     fun countUnresolved(moduleName: String? = null): Long {
@@ -463,6 +474,12 @@ class SymbolDatabase private constructor(
                     stmt.execute("PRAGMA query_only = ON;")
                 } else {
                     stmt.execute("PRAGMA journal_mode=WAL;")
+                    stmt.execute("PRAGMA synchronous=NORMAL;")
+                    stmt.execute("PRAGMA foreign_keys=ON;")
+                    stmt.execute("PRAGMA mmap_size=268435456;")
+                    stmt.execute("PRAGMA cache_size=-64000;")
+                    stmt.execute("PRAGMA temp_store=MEMORY;")
+                    stmt.execute("PRAGMA busy_timeout=30000;")
                 }
             }
             return SymbolDatabase(conn, readOnly)

@@ -106,4 +106,21 @@ class SymbolDatabaseTest {
             }
         }
     }
+
+    @Test
+    fun `concurrent write operations are safely serialized without SQLITE_BUSY`() {
+        val dbPath = Files.createTempDirectory("repomind-concurrent-db").resolve("index.db")
+        SymbolDatabase.open(dbPath).use { db ->
+            val threads = (1..8).map { threadId ->
+                Thread {
+                    val types = (1..20).map { i -> type("com.thread$threadId.Class$i") }
+                    db.replaceModule("mod$threadId", parseOf(types))
+                }
+            }
+            threads.forEach { it.start() }
+            threads.forEach { it.join() }
+
+            assertEquals(8 * 20 * 2L, db.count())
+        }
+    }
 }
