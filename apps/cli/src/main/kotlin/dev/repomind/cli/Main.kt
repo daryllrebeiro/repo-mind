@@ -32,6 +32,7 @@ import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 import picocli.CommandLine
 import picocli.CommandLine.Command
+import picocli.CommandLine.Option
 import picocli.CommandLine.Parameters
 import java.nio.file.Path
 import kotlin.system.exitProcess
@@ -233,12 +234,49 @@ class IndexCommand : Runnable {
     @Parameters(index = "0", description = ["Repository root directory"])
     lateinit var root: Path
 
+    @Option(names = ["--push-remote"], description = ["Push the indexed graph bundle to a remote cache (directory or URL)"])
+    var pushRemote: String? = null
+
+    @Option(names = ["--pull-remote"], description = ["Pull a pre-indexed graph bundle from a remote cache if available"])
+    var pullRemote: String? = null
+
     override fun run() {
         val startedAt = System.nanoTime()
-        val scan = RepositoryScanner().scan(dev.repomind.core.model.PathGuard.requireDirectory(root))
+        val repoRoot = dev.repomind.core.model.PathGuard.requireDirectory(root)
+        val dbPath = repoRoot.resolve(".repomind/index.db")
+
+        // 1. Check remote cache if --pull-remote specified
+        if (!pullRemote.isNullOrBlank()) {
+            val storage = dev.repomind.core.index.remote.RemoteIndexStorage.resolve(pullRemote!!)
+            val cacheManager = dev.repomind.core.index.remote.RemoteIndexCacheManager(storage)
+            val manifest = cacheManager.pullIndex(repoRoot, dbPath)
+            if (manifest != null) {
+                val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+                println(
+                    Json.encodeToString(
+                        IndexResultDto.serializer(),
+                        IndexResultDto(
+                            modules = manifest.moduleCount,
+                            symbolsIndexed = 0,
+                            edgesIndexed = 0,
+                            totalSymbols = manifest.symbolCount,
+                            totalEdges = manifest.edgeCount,
+                            totalUnresolved = 0,
+                            confidenceRate = 1.0,
+                            elapsedMs = elapsedMs,
+                            remoteCacheHit = true,
+                        ),
+                    ),
+                )
+                return
+            }
+        }
+
+        // 2. Perform indexing
+        val scan = RepositoryScanner().scan(repoRoot)
         val resolver = ClasspathResolver(cache = FileBasedClasspathCache(scan.root.resolve(".repomind/cache/classpath")))
         val parser = JavaSemanticParser()
-        SymbolDatabase.open(scan.root.resolve(".repomind/index.db")).use { db ->
+        SymbolDatabase.open(dbPath).use { db ->
             var symbolCount = 0
             var edgeCount = 0
             for (module in scan.modules) {
@@ -265,6 +303,14 @@ class IndexCommand : Runnable {
             }
             val report = db.confidenceReport()
             val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+
+            // 3. Push to remote cache if --push-remote specified
+            if (!pushRemote.isNullOrBlank()) {
+                val storage = dev.repomind.core.index.remote.RemoteIndexStorage.resolve(pushRemote!!)
+                val cacheManager = dev.repomind.core.index.remote.RemoteIndexCacheManager(storage)
+                cacheManager.pushIndex(repoRoot, dbPath)
+            }
+
             println(
                 Json.encodeToString(
                     IndexResultDto.serializer(),
@@ -277,6 +323,7 @@ class IndexCommand : Runnable {
                         totalUnresolved = report.totalUnresolved,
                         confidenceRate = report.confidenceRate,
                         elapsedMs = elapsedMs,
+                        remoteCacheHit = false,
                     ),
                 ),
             )
@@ -294,6 +341,7 @@ data class IndexResultDto(
     val totalUnresolved: Long,
     val confidenceRate: Double,
     val elapsedMs: Long,
+    val remoteCacheHit: Boolean = false,
 )
 
 @Command(

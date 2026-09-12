@@ -201,6 +201,15 @@ class SymbolDatabase private constructor(
             }
         }
 
+    fun allRecordedModules(): List<String> =
+        connection.createStatement().use { stmt ->
+            stmt.executeQuery("SELECT name FROM modules ORDER BY name").use { rs ->
+                buildList {
+                    while (rs.next()) add(rs.getString("name"))
+                }
+            }
+        }
+
     fun deleteModule(moduleName: String) = withWriteLock {
         connection.autoCommit = false
         try {
