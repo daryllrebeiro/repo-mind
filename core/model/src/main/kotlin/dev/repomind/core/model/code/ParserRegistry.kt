@@ -42,4 +42,14 @@ class ParserRegistry(private val parsers: MutableList<LanguageParser> = mutableL
             edges = allEdges.distinctBy { listOf(it.sourceFqn, it.targetFqn, it.kind, it.confidence) },
         )
     }
+
+    companion object {
+        fun defaultRegistry(): ParserRegistry = ParserRegistry(
+            mutableListOf(
+                KotlinSemanticParser(),
+                TypeScriptSemanticParser(),
+                PythonSemanticParser(),
+            ),
+        )
+    }
 }

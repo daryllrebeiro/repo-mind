@@ -207,4 +207,107 @@ class MultiLanguageParserTest {
         // Check typealias generic argument extracted
         assertTrue(parsed.edges.any { it.kind == EdgeKind.USES && it.targetFqn == "com.example.model.PaymentGateway" })
     }
+
+    @Test
+    fun `typescript semantic parser extracts classes interfaces imports and calls`() {
+        val root = Files.createTempDirectory("ts-test-repo")
+        val src = root.resolve("src/services")
+        Files.createDirectories(src)
+
+        val tsFile = src.resolve("user.service.ts")
+        tsFile.writeText(
+            """
+            import { UserRepository } from '../repositories/user.repository';
+            import { IUserService } from '../interfaces/user.interface';
+            import { BaseService } from './base.service';
+
+            @Injectable()
+            export class UserService extends BaseService implements IUserService {
+                constructor(private readonly userRepo: UserRepository) {
+                    super();
+                }
+
+                async getUser(id: string) {
+                    return this.userRepo.findById(id);
+                }
+            }
+            """.trimIndent(),
+        )
+
+        val parser = TypeScriptSemanticParser()
+        val module = RepoModule(
+            name = "ts-mod",
+            path = root,
+            buildFile = null,
+            sourceRoots = listOf(SourceRoot(root.resolve("src"), isTest = false)),
+        )
+
+        val parsed = parser.parseModule(module)
+        assertEquals(1, parsed.types.size)
+        val userType = parsed.types.single()
+        assertEquals("services.UserService", userType.fqn)
+        assertTrue(userType.annotations.contains("Injectable"))
+        assertTrue(userType.methods.any { it.name == "getUser" })
+        assertTrue(userType.fields.any { it.name == "userRepo" })
+
+        // Check edges
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.EXTENDS && it.targetFqn == "./base.service" })
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.IMPLEMENTS && it.targetFqn == "../interfaces/user.interface" })
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.USES && it.targetFqn == "../repositories/user.repository" })
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.CALLS && it.targetFqn == "../repositories/user.repository" })
+    }
+
+    @Test
+    fun `python semantic parser extracts classes functions decorators and call edges`() {
+        val root = Files.createTempDirectory("py-test-repo")
+        val src = root.resolve("app/services")
+        Files.createDirectories(src)
+
+        val pyFile = src.resolve("order_service.py")
+        pyFile.writeText(
+            """
+            from app.repositories.order_repo import OrderRepository
+            from app.services.base import BaseService
+
+            @router.service
+            class OrderService(BaseService):
+                def __init__(self, repo: OrderRepository):
+                    self.repo = repo
+
+                def process_order(self, order_id: str):
+                    self.repo.save(order_id)
+                    return True
+            """.trimIndent(),
+        )
+
+        val parser = PythonSemanticParser()
+        val module = RepoModule(
+            name = "py-mod",
+            path = root,
+            buildFile = null,
+            sourceRoots = listOf(SourceRoot(root.resolve("app"), isTest = false)),
+        )
+
+        val parsed = parser.parseModule(module)
+        assertEquals(1, parsed.types.size)
+        val orderType = parsed.types.single()
+        assertEquals("services.OrderService", orderType.fqn)
+        assertTrue(orderType.methods.any { it.name == "process_order" })
+        assertTrue(orderType.fields.any { it.name == "repo" })
+
+        // Check edges
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.EXTENDS && it.targetFqn == "app.services.base.BaseService" })
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.USES && it.targetFqn == "app.repositories.order_repo.OrderRepository" })
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.CALLS && it.targetFqn == "app.repositories.order_repo.OrderRepository" })
+    }
+
+    @Test
+    fun `default parser registry resolves kotlin typescript and python parsers`() {
+        val registry = ParserRegistry.defaultRegistry()
+        assertTrue(registry.forExtension("kt") is KotlinSemanticParser)
+        assertTrue(registry.forExtension("ts") is TypeScriptSemanticParser)
+        assertTrue(registry.forExtension("tsx") is TypeScriptSemanticParser)
+        assertTrue(registry.forExtension("js") is TypeScriptSemanticParser)
+        assertTrue(registry.forExtension("py") is PythonSemanticParser)
+    }
 }
