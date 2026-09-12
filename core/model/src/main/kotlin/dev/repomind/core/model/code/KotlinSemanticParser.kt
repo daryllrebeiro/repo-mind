@@ -62,7 +62,8 @@ class KotlinSemanticParser : LanguageParser {
         // Second pass: extract classes, objects, functions, properties
         var currentClassName: String? = null
         var currentClassLineStart = 1
-        var currentClassAnnotations = mutableListOf<String>()
+        val currentClassAnnotations = mutableListOf<String>()
+        val pendingAnnotations = mutableListOf<String>()
         val currentMethods = mutableListOf<ParsedMethod>()
         val currentFields = mutableListOf<ParsedField>()
         var currentClassKind = TypeKind.CLASS
@@ -119,8 +120,40 @@ class KotlinSemanticParser : LanguageParser {
 
             // Collect annotations
             if (trimmed.startsWith("@")) {
-                val ann = trimmed.substringAfter('@').substringBefore('(').substringBefore(' ')
-                currentClassAnnotations += ann
+                val raw = trimmed.substringAfter('@').trim()
+                val name = raw.substringBefore('(').substringBefore(' ').trim()
+                pendingAnnotations += name
+                if (raw.contains('(')) {
+                    pendingAnnotations += "@" + raw.replace(',', ';')
+                }
+                continue
+            }
+
+            // Typealias declarations: typealias HandlerMap = Map<String, RequestHandler>
+            val typealiasMatch = Regex("^typealias\\s+([A-Za-z0-9_]+)(?:\\s*<.*?>)?\\s*=\\s*(.+)").find(trimmed)
+            if (typealiasMatch != null) {
+                pendingAnnotations.clear()
+                val aliasName = typealiasMatch.groupValues[1].trim()
+                val rhs = typealiasMatch.groupValues[2].trim()
+                val simpleName = filePath.fileName.toString().substringBeforeLast('.')
+                val fileClass = simpleName.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() } + "Kt"
+                val fileFqn = if (packageName.isNotBlank()) "$packageName.$fileClass" else fileClass
+                val ownerFqn = currentClassName?.let { if (packageName.isNotBlank()) "$packageName.$it" else it } ?: fileFqn
+                val domainTypes = extractDomainTypes(rhs)
+                for (dt in domainTypes) {
+                    val targetFqn = imports.firstOrNull { it.endsWith(".$dt") }
+                        ?: if (packageName.isNotBlank() && dt != aliasName) "$packageName.$dt" else null
+                    if (targetFqn != null) {
+                        edges += DependencyEdge(
+                            sourceFqn = ownerFqn,
+                            targetFqn = targetFqn,
+                            kind = EdgeKind.USES,
+                            confidence = Confidence.CONFIRMED,
+                            line = lineNum,
+                            callerMember = aliasName,
+                        )
+                    }
+                }
                 continue
             }
 
@@ -137,6 +170,8 @@ class KotlinSemanticParser : LanguageParser {
                     }
                     currentClassName = name
                     currentClassLineStart = lineNum
+                    currentClassAnnotations.addAll(pendingAnnotations)
+                    pendingAnnotations.clear()
                     currentClassKind = when (kindStr) {
                         "interface" -> TypeKind.INTERFACE
                         "enum class" -> TypeKind.ENUM
@@ -145,25 +180,30 @@ class KotlinSemanticParser : LanguageParser {
                     }
 
                     // Extract constructor parameters: (val/var name: Type)
-                    val ctorParams = Regex("(@[A-Za-z0-9_]+ +)?(val|var) +([A-Za-z0-9_]+) *: *([A-Za-z0-9_<>]+)").findAll(trimmed)
+                    val ctorParams = Regex("(@[A-Za-z0-9_]+(?:\\(.*?\\))?\\s+)?(val|var)\\s+([A-Za-z0-9_]+)\\s*:\\s*([A-Za-z0-9_<>?,\\s]+?)(?:\\)|,|=|$)").findAll(trimmed)
+                    val ownerFqn = if (packageName.isNotBlank()) "$packageName.$name" else name
                     for (paramMatch in ctorParams) {
                         val pAnnotation = paramMatch.groupValues[1].trim().removePrefix("@").takeIf { it.isNotBlank() }
                         val pName = paramMatch.groupValues[3]
-                        val pType = paramMatch.groupValues[4].substringBefore('<')
+                        val rawType = paramMatch.groupValues[4].trim()
+                        val pType = rawType.substringBefore('<').substringBefore('?').trim()
                         propertyTypeMap[pName] = pType
                         currentFields += ParsedField(
                             name = pName,
-                            declaredType = pType,
+                            declaredType = rawType,
                             visibility = Visibility.PRIVATE,
                             isStatic = false,
                             annotations = listOfNotNull(pAnnotation),
                             line = lineNum,
                         )
-                        // Record USES edge to imported type
-                        val targetFqn = imports.firstOrNull { it.endsWith(".$pType") }
-                        if (targetFqn != null) {
-                            val ownerFqn = if (packageName.isNotBlank()) "$packageName.$name" else name
-                            edges += DependencyEdge(ownerFqn, targetFqn, EdgeKind.USES, Confidence.CONFIRMED, lineNum)
+                        // Record USES edge to domain types including generic arguments
+                        val domainTypes = extractDomainTypes(rawType)
+                        for (dt in domainTypes) {
+                            val targetFqn = imports.firstOrNull { it.endsWith(".$dt") }
+                                ?: if (packageName.isNotBlank() && dt != name) "$packageName.$dt" else null
+                            if (targetFqn != null) {
+                                edges += DependencyEdge(ownerFqn, targetFqn, EdgeKind.USES, Confidence.CONFIRMED, lineNum)
+                            }
                         }
                     }
 
@@ -206,7 +246,9 @@ class KotlinSemanticParser : LanguageParser {
                     isStatic = false,
                     isAbstract = false,
                     line = lineNum,
+                    annotations = pendingAnnotations.toList(),
                 )
+                pendingAnnotations.clear()
 
                 val cls = currentClassName!!
                 val ownerFqn = if (packageName.isNotBlank()) "$packageName.$cls" else cls
@@ -241,7 +283,9 @@ class KotlinSemanticParser : LanguageParser {
                     isStatic = false,
                     isAbstract = "abstract" in trimmed || currentClassKind == TypeKind.INTERFACE,
                     line = lineNum,
+                    annotations = pendingAnnotations.toList(),
                 )
+                pendingAnnotations.clear()
 
                 val cls = currentClassName!!
                 val ownerFqn = if (packageName.isNotBlank()) "$packageName.$cls" else cls
@@ -251,21 +295,33 @@ class KotlinSemanticParser : LanguageParser {
             }
 
             // Properties
-            val propMatch = Regex("^(public |internal |private |protected )*(val|var) +([A-Za-z0-9_]+) *: *([A-Za-z0-9_<>]+)").find(trimmed)
+            val propMatch = Regex("^(public |internal |private |protected |override )*(val|var) +([A-Za-z0-9_]+) *: *([A-Za-z0-9_<>?,\\s]+)").find(trimmed)
             if (propMatch != null) {
                 ensureClassForTopLevel(lineNum)
                 val propName = propMatch.groupValues[3]
-                val propType = propMatch.groupValues[4]
+                val rawType = propMatch.groupValues[4].trim()
+                val propType = rawType.substringBefore('<').substringBefore('?').trim()
                 propertyTypeMap[propName] = propType
                 val vis = if ("private" in trimmed) Visibility.PRIVATE else Visibility.PUBLIC
                 currentFields += ParsedField(
                     name = propName,
-                    declaredType = propType,
+                    declaredType = rawType,
                     visibility = vis,
                     isStatic = false,
-                    annotations = emptyList(),
+                    annotations = pendingAnnotations.toList(),
                     line = lineNum,
                 )
+                pendingAnnotations.clear()
+                val cls = currentClassName!!
+                val ownerFqn = if (packageName.isNotBlank()) "$packageName.$cls" else cls
+                val domainTypes = extractDomainTypes(rawType)
+                for (dt in domainTypes) {
+                    val targetFqn = imports.firstOrNull { it.endsWith(".$dt") }
+                        ?: if (packageName.isNotBlank() && dt != cls) "$packageName.$dt" else null
+                    if (targetFqn != null) {
+                        edges += DependencyEdge(ownerFqn, targetFqn, EdgeKind.USES, Confidence.CONFIRMED, lineNum)
+                    }
+                }
                 continue
             }
 
@@ -319,14 +375,18 @@ class KotlinSemanticParser : LanguageParser {
         edges: MutableList<DependencyEdge>,
     ) {
         if (paramsStr.isBlank()) return
-        val params = paramsStr.split(",")
-        for (p in params) {
-            val parts = p.trim().split(":")
-            if (parts.size == 2) {
-                val pName = parts[0].trim().substringAfterLast(" ")
-                val pType = parts[1].trim().substringBefore("<").substringBefore("=")
-                propertyTypeMap[pName] = pType
-                val targetFqn = imports.firstOrNull { it.endsWith(".$pType") }
+        val paramDeclRegex = Regex("([A-Za-z0-9_]+)\\s*:\\s*([A-Za-z0-9_<>?,\\s]+?)(?:,|=|$)")
+        for (match in paramDeclRegex.findAll(paramsStr)) {
+            val pName = match.groupValues[1].trim()
+            val rawType = match.groupValues[2].trim()
+            val pType = rawType.substringBefore('<').substringBefore('?').trim()
+            propertyTypeMap[pName] = pType
+            val domainTypes = extractDomainTypes(rawType)
+            for (dt in domainTypes) {
+                val targetFqn = imports.firstOrNull { it.endsWith(".$dt") }
+                    ?: if (ownerFqn.contains('.') && dt != ownerFqn.substringAfterLast('.')) {
+                        "${ownerFqn.substringBeforeLast('.')}.$dt"
+                    } else null
                 if (targetFqn != null) {
                     edges += DependencyEdge(
                         sourceFqn = ownerFqn,
@@ -338,6 +398,24 @@ class KotlinSemanticParser : LanguageParser {
                     )
                 }
             }
+        }
+    }
+
+    companion object {
+        private val STANDARD_TYPES = setOf(
+            "String", "Int", "Long", "Double", "Float", "Boolean", "Byte", "Short", "Char",
+            "Unit", "Any", "Nothing", "List", "Set", "Map", "MutableList", "MutableSet",
+            "MutableMap", "Collection", "Iterable", "Sequence", "Array", "Pair", "Triple",
+            "Optional", "T", "R", "K", "V", "E"
+        )
+
+        fun extractDomainTypes(typeStr: String): List<String> {
+            return Regex("[A-Za-z0-9_]+")
+                .findAll(typeStr)
+                .map { it.value }
+                .filter { it.isNotBlank() && it !in STANDARD_TYPES && !it.all { ch -> ch.isDigit() } }
+                .distinct()
+                .toList()
         }
     }
 }

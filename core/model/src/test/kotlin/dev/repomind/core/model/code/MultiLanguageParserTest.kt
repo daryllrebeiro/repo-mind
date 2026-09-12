@@ -151,4 +151,60 @@ class MultiLanguageParserTest {
         assertTrue(typeNames.contains("com.example.Manager"))
         assertTrue(typeNames.contains("com.example.Companion"))
     }
+
+    @Test
+    fun `kotlin parser extracts generic type arguments in constructor and properties and typealiases`() {
+        val root = Files.createTempDirectory("kt-generics-repo")
+        val src = root.resolve("src/main/kotlin/com/example")
+        Files.createDirectories(src)
+
+        val ktFile = src.resolve("BillingTypes.kt")
+        ktFile.writeText(
+            """
+            package com.example
+
+            import com.example.model.OrderItem
+            import com.example.model.Customer
+            import com.example.model.Invoice
+            import com.example.model.PaymentGateway
+
+            typealias PaymentMap = Map<String, PaymentGateway>
+
+            @Service("billingService")
+            class BillingService(
+                val items: List<OrderItem>,
+                val customers: Map<String, Customer>
+            ) {
+                val invoices: MutableList<Invoice> = mutableListOf()
+
+                fun process(batch: List<Invoice>) {
+                    // processing
+                }
+            }
+            """.trimIndent(),
+        )
+
+        val parser = KotlinSemanticParser()
+        val module = RepoModule(
+            name = "kt-mod",
+            path = root,
+            buildFile = null,
+            sourceRoots = listOf(SourceRoot(root.resolve("src/main/kotlin"), isTest = false)),
+        )
+
+        val parsed = parser.parseModule(module)
+        val billingType = parsed.types.first { it.fqn == "com.example.BillingService" }
+        assertTrue(billingType.annotations.contains("Service"))
+        assertTrue(billingType.annotations.contains("@Service(\"billingService\")"))
+
+        // Check constructor generic arguments extracted as USES edges
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.USES && it.targetFqn == "com.example.model.OrderItem" })
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.USES && it.targetFqn == "com.example.model.Customer" })
+
+        // Check property generic argument extracted
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.USES && it.targetFqn == "com.example.model.Invoice" })
+
+        // Check typealias generic argument extracted
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.USES && it.targetFqn == "com.example.model.PaymentGateway" })
+    }
 }
