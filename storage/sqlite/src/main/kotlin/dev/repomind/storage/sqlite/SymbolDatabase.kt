@@ -51,6 +51,10 @@ class SymbolDatabase private constructor(
         }
     }
 
+    fun execute(sql: String) = withWriteLock {
+        connection.createStatement().use { it.execute(sql) }
+    }
+
     init {
         if (!readOnly) {
             connection.createStatement().use { stmt ->
@@ -425,6 +429,12 @@ class SymbolDatabase private constructor(
 
     fun findDeprecatedSymbols(): List<SymbolRow> =
         query("SELECT $COLUMNS FROM symbols WHERE annotations LIKE '%Deprecated%' ORDER BY qualified_name")
+
+    fun symbolsIn(module: String): List<SymbolRow> =
+        query("SELECT $COLUMNS FROM symbols WHERE module = ? ORDER BY qualified_name", module)
+
+    fun allSymbols(): List<SymbolRow> =
+        query("SELECT $COLUMNS FROM symbols ORDER BY qualified_name")
 
     fun count(): Long =
         connection.createStatement().use { stmt ->
