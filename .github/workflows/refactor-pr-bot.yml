@@ -1,0 +1,61 @@
+name: Autonomous Refactor PR Bot
+
+on:
+  schedule:
+    # Run every Monday at 04:00 UTC
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      migrate_deprecated:
+        description: 'Migrate deprecated method invocations'
+        required: true
+        type: boolean
+        default: true
+      dead_code_elimination:
+        description: 'Remove zero-caller private dead methods'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refactor-and-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x gradlew
+
+      - name: Build RepoMind CLI Distribution
+        run: ./gradlew :cli:installDist --no-daemon
+
+      - name: Index Codebase
+        run: ./apps/cli/build/install/cli/bin/cli index .
+
+      - name: Run Autonomous Refactoring & Open Pull Request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FLAGS="--apply --create-pr --branch repomind/auto-refactor-$(date +%s) --token $GITHUB_TOKEN"
+          if [ "${{ github.event.inputs.migrate_deprecated != 'false' }}" = "true" ]; then
+            FLAGS="$FLAGS --migrate-deprecated"
+          fi
+          if [ "${{ github.event.inputs.dead_code_elimination }}" = "true" ]; then
+            FLAGS="$FLAGS --dead-code"
+          fi
+          ./apps/cli/build/install/cli/bin/cli refactor . $FLAGS

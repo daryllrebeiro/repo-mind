@@ -830,8 +830,23 @@ class RefactorCommand : Runnable {
     @picocli.CommandLine.Option(names = ["--apply"], description = ["Apply changes to disk (default is dry-run diff preview)"])
     var apply: Boolean = false
 
-    @picocli.CommandLine.Option(names = ["--create-pr"], description = ["Print GitHub PR creation command template"])
+    @picocli.CommandLine.Option(names = ["--create-pr"], description = ["Create a Git branch and submit a GitHub Pull Request"])
     var createPr: Boolean = false
+
+    @picocli.CommandLine.Option(names = ["--branch"], description = ["Branch name for refactoring Pull Request"])
+    var branch: String? = null
+
+    @picocli.CommandLine.Option(names = ["--base"], description = ["Base target branch for PR (default: main)"])
+    var base: String = "main"
+
+    @picocli.CommandLine.Option(names = ["--title"], description = ["Title for the refactoring Pull Request"])
+    var prTitle: String = "refactor: automated architectural deprecation migration via RepoMind"
+
+    @picocli.CommandLine.Option(names = ["--token"], description = ["GitHub Personal Access Token or GITHUB_TOKEN"])
+    var token: String? = null
+
+    @picocli.CommandLine.Option(names = ["--auto-push"], description = ["Automatically push refactor branch to remote origin"])
+    var autoPush: Boolean = false
 
     override fun run() {
         val normalizedRoot = root.toAbsolutePath().normalize()
@@ -953,7 +968,22 @@ class RefactorCommand : Runnable {
             }
 
             if (createPr) {
-                println("gh pr create --title \"refactor: automated architectural refactoring via RepoMind\" --body \"Applied ${result.totalTransformations} transformation(s) across ${result.totalFilesChanged} file(s).\"")
+                val bot = dev.repomind.cli.refactor.RefactorPrBot(
+                    repoRoot = normalizedRoot,
+                    token = token,
+                )
+                val branchName = branch ?: "repomind/refactor-${System.currentTimeMillis() / 1000}"
+                val prResult = bot.executeRefactorPr(
+                    result = result,
+                    branchName = branchName,
+                    baseBranch = base,
+                    title = prTitle,
+                    autoPush = autoPush,
+                )
+                println(prResult.message)
+                if (prResult.prUrl != null) {
+                    println("Pull Request URL: ${prResult.prUrl}")
+                }
             }
         }
     }
