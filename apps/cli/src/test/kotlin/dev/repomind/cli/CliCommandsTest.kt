@@ -209,4 +209,21 @@ class CliCommandsTest {
         val reportContent = Files.readString(outReport)
         assertTrue(reportContent.contains("RepoMind Enterprise Polyrepo Federation Report"))
     }
+
+    @Test
+    fun `drift-shield command evaluates architecture boundaries and outputs formatted webhook payload`() {
+        val root = createSampleProject()
+        IncrementalIndexer(root.resolve(".repomind/index.db")).update(root)
+
+        val cmd = CommandLine(RepomindCli())
+        val exitCode = cmd.execute(
+            "drift-shield",
+            root.toString(),
+            "--webhook=https://hooks.slack.com/services/MOCK/TEST/123",
+            "--dry-run",
+            "--commit=abcdef123456",
+            "--branch=test-branch",
+        )
+        assertEquals(0, exitCode)
+    }
 }

@@ -61,6 +61,7 @@ import kotlin.system.exitProcess
         RefactorCommand::class,
         FederateCommand::class,
         RagExportCommand::class,
+        DriftShieldCommand::class,
     ],
 )
 class RepomindCli : Runnable {
@@ -1072,6 +1073,107 @@ class RagExportCommand : Runnable {
                     result,
                 ),
             )
+        }
+    }
+}
+
+@Command(
+    name = "drift-shield",
+    description = ["Evaluate architectural drift and dispatch real-time webhook alerts (Slack, Teams, Discord)."],
+)
+class DriftShieldCommand : Runnable {
+    @Parameters(index = "0", description = ["Repository root directory"])
+    lateinit var root: Path
+
+    @Option(names = ["--webhook", "-w"], required = true, description = ["Webhook URL (Slack, MS Teams, Discord, or generic)"])
+    lateinit var webhookUrl: String
+
+    @Option(names = ["--provider"], description = ["Explicit provider override: SLACK, TEAMS, DISCORD, GENERIC (default: auto-detect)"])
+    var provider: String? = null
+
+    @Option(names = ["--commit"], description = ["Commit SHA or ref being evaluated"])
+    var commitSha: String? = null
+
+    @Option(names = ["--branch"], description = ["Branch name being evaluated"])
+    var branch: String? = null
+
+    @Option(names = ["--rules"], description = ["Path to custom rules.yaml file (default: .repomind/rules.yaml)"])
+    var rulesPath: Path? = null
+
+    @Option(names = ["--dry-run"], description = ["Print formatted webhook payload without sending network request"])
+    var dryRun: Boolean = false
+
+    @Option(names = ["--fail-on-violation"], description = ["Exit with status code 1 if any architectural drift violations are detected"])
+    var failOnViolation: Boolean = false
+
+    override fun run() {
+        val normalizedRoot = root.toAbsolutePath().normalize()
+        val dbPath = normalizedRoot.resolve(".repomind/index.db")
+        if (!java.nio.file.Files.isRegularFile(dbPath)) {
+            System.err.println("ERROR: no index at $dbPath — run 'repomind index <repo>' first")
+            exitProcess(1)
+        }
+
+        // 1. Resolve rules
+        val resolvedRulesPath = rulesPath ?: normalizedRoot.resolve(".repomind/rules.yaml")
+        val rules = if (java.nio.file.Files.isRegularFile(resolvedRulesPath)) {
+            RuleLoader.load(resolvedRulesPath)
+        } else {
+            System.err.println("WARNING: no rules found at $resolvedRulesPath — evaluating against empty ruleset.")
+            emptyList()
+        }
+
+        // 2. Evaluate rules against database
+        val (violations, _) = SymbolDatabase.open(dbPath).use { db ->
+            val allTypes = db.allTypes()
+            val stereotypes = allTypes.map {
+                TypeStereotypeInfo(
+                    fqn = it.qualifiedName,
+                    annotations = it.annotations,
+                )
+            }
+            val edges = db.edges.allEdges()
+            val evaluator = RuleEvaluator()
+            val report = evaluator.evaluate(rules, stereotypes, edges)
+            Pair(report.violations, report.checkedTypes)
+        }
+
+        // 3. Resolve git metadata
+        val gitContext = dev.repomind.core.rules.drift.DriftShieldDispatcher.resolveGitContext(normalizedRoot)
+        val alert = dev.repomind.core.rules.drift.DriftAlert(
+            repoName = gitContext.repoName,
+            commitSha = commitSha ?: gitContext.commitSha,
+            branch = branch ?: gitContext.branch,
+            author = gitContext.author,
+            violations = violations,
+        )
+
+        // 4. Dispatch alert
+        val dispatcher = dev.repomind.core.rules.drift.DriftShieldDispatcher()
+        val providerOverride = provider?.let {
+            try {
+                dev.repomind.core.rules.drift.WebhookProvider.valueOf(it.uppercase())
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        val result = dispatcher.dispatchAlert(
+            webhookUrl = webhookUrl,
+            alert = alert,
+            providerOverride = providerOverride,
+            dryRun = dryRun,
+        )
+
+        println(result.message)
+        if (dryRun) {
+            println("--- Formatted Webhook Payload (${result.provider}) ---")
+            println(result.payloadFormatted)
+        }
+
+        if (failOnViolation && violations.isNotEmpty()) {
+            System.err.println("Drift Shield failed: ${violations.size} architectural violation(s) detected.")
+            exitProcess(1)
         }
     }
 }

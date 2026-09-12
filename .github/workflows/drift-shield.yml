@@ -1,0 +1,51 @@
+name: Architectural Drift Shield
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift-shield:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x gradlew
+
+      - name: Build RepoMind CLI Distribution
+        run: ./gradlew :cli:installDist --no-daemon
+
+      - name: Index Codebase
+        run: ./apps/cli/build/install/cli/bin/cli index .
+
+      - name: Run Drift Shield & Dispatch Webhook Alert
+        env:
+          DRIFT_WEBHOOK_URL: ${{ secrets.DRIFT_WEBHOOK_URL }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          CLI="./apps/cli/build/install/cli/bin/cli"
+          if [ -n "$DRIFT_WEBHOOK_URL" ]; then
+            $CLI drift-shield . --webhook "$DRIFT_WEBHOOK_URL" --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --fail-on-violation
+          else
+            echo "No DRIFT_WEBHOOK_URL secret detected. Running Drift Shield in dry-run mode."
+            $CLI drift-shield . --webhook "https://hooks.slack.com/services/DUMMY/DRYRUN/TEST" --dry-run --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --fail-on-violation
+          fi
