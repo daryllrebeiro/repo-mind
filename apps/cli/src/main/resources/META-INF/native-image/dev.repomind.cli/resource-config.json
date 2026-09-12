@@ -1,0 +1,10 @@
+{
+  "resources": {
+    "includes": [
+      { "pattern": ".*\\.xml$" },
+      { "pattern": ".*\\.yaml$" },
+      { "pattern": ".*\\.yml$" },
+      { "pattern": ".*\\.properties$" }
+    ]
+  }
+}
