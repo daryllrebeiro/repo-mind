@@ -302,12 +302,63 @@ class MultiLanguageParserTest {
     }
 
     @Test
-    fun `default parser registry resolves kotlin typescript and python parsers`() {
+    fun `go semantic parser extracts packages structs interfaces receiver methods and calls`() {
+        val root = Files.createTempDirectory("go-test-repo")
+        val src = root.resolve("src/services")
+        Files.createDirectories(src)
+
+        val goFile = src.resolve("payment.go")
+        goFile.writeText(
+            """
+            package services
+
+            import (
+                "github.com/sample/repo/gateway"
+            )
+
+            type PaymentProcessor interface {
+                Process(amount float64) error
+            }
+
+            type PaymentService struct {
+                gw *gateway.PaymentGateway
+            }
+
+            func (s *PaymentService) ExecutePayment(gw *gateway.PaymentGateway) error {
+                gw.Charge()
+                return nil
+            }
+            """.trimIndent(),
+        )
+
+        val parser = GoSemanticParser()
+        val module = RepoModule(
+            name = "go-mod",
+            path = root,
+            buildFile = null,
+            sourceRoots = listOf(SourceRoot(root.resolve("src"), isTest = false)),
+        )
+
+        val parsed = parser.parseModule(module)
+        assertTrue(parsed.types.any { it.fqn == "services.PaymentProcessor" && it.kind == TypeKind.INTERFACE })
+        assertTrue(parsed.types.any { it.fqn == "services.PaymentService" && it.kind == TypeKind.CLASS })
+
+        val serviceType = parsed.types.first { it.fqn == "services.PaymentService" }
+        assertTrue(serviceType.methods.any { it.name == "ExecutePayment" })
+
+        // Check edges
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.USES && it.targetFqn == "github.com/sample/repo/gateway.PaymentGateway" })
+        assertTrue(parsed.edges.any { it.kind == EdgeKind.CALLS && it.targetFqn == "github.com/sample/repo/gateway.Charge" })
+    }
+
+    @Test
+    fun `default parser registry resolves kotlin typescript python and go parsers`() {
         val registry = ParserRegistry.defaultRegistry()
         assertTrue(registry.forExtension("kt") is KotlinSemanticParser)
         assertTrue(registry.forExtension("ts") is TypeScriptSemanticParser)
         assertTrue(registry.forExtension("tsx") is TypeScriptSemanticParser)
         assertTrue(registry.forExtension("js") is TypeScriptSemanticParser)
         assertTrue(registry.forExtension("py") is PythonSemanticParser)
+        assertTrue(registry.forExtension("go") is GoSemanticParser)
     }
 }

@@ -49,6 +49,7 @@ class ParserRegistry(private val parsers: MutableList<LanguageParser> = mutableL
                 KotlinSemanticParser(),
                 TypeScriptSemanticParser(),
                 PythonSemanticParser(),
+                GoSemanticParser(),
             ),
         )
     }
