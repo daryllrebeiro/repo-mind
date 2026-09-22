@@ -226,4 +226,22 @@ class CliCommandsTest {
         )
         assertEquals(0, exitCode)
     }
+
+    @Test
+    fun `hook command installs, checks status, and uninstalls pre-commit hook`() {
+        val root = Files.createTempDirectory("cli-hook-repo")
+        Files.createDirectories(root.resolve(".git"))
+
+        val cmd = CommandLine(RepomindCli())
+        val installExit = cmd.execute("hook", "install", root.toString())
+        assertEquals(0, installExit)
+        assertTrue(Files.isRegularFile(root.resolve(".git/hooks/pre-commit")))
+
+        val statusExit = cmd.execute("hook", "status", root.toString())
+        assertEquals(0, statusExit)
+
+        val uninstallExit = cmd.execute("hook", "uninstall", root.toString())
+        assertEquals(0, uninstallExit)
+        assertFalse(Files.exists(root.resolve(".git/hooks/pre-commit")))
+    }
 }

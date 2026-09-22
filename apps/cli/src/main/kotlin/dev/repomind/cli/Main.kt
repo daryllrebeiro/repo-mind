@@ -62,6 +62,7 @@ import kotlin.system.exitProcess
         FederateCommand::class,
         RagExportCommand::class,
         DriftShieldCommand::class,
+        HookCommand::class,
     ],
 )
 class RepomindCli : Runnable {
@@ -1175,6 +1176,80 @@ class DriftShieldCommand : Runnable {
             System.err.println("Drift Shield failed: ${violations.size} architectural violation(s) detected.")
             exitProcess(1)
         }
+    }
+}
+
+@Command(
+    name = "hook",
+    description = ["Manage Git pre-commit and pre-push architecture guard hooks."],
+    subcommands = [
+        HookInstallSubcommand::class,
+        HookUninstallSubcommand::class,
+        HookStatusSubcommand::class,
+    ],
+)
+class HookCommand : Runnable {
+    override fun run() {
+        CommandLine.usage(this, System.out)
+    }
+}
+
+@Command(name = "install", description = ["Install a Git architecture guard hook."])
+class HookInstallSubcommand : Runnable {
+    @Parameters(index = "0", arity = "0..1", defaultValue = ".", description = ["Repository root directory (default: current directory)"])
+    var root: Path = Path.of(".")
+
+    @Option(names = ["--pre-push"], description = ["Install as pre-push hook instead of pre-commit"])
+    var prePush: Boolean = false
+
+    @Option(names = ["--fail-on-violation"], defaultValue = "true", description = ["Reject git commit/push on rule violation (default: true)"])
+    var failOnViolation: Boolean = true
+
+    override fun run() {
+        val repoRoot = root.toAbsolutePath().normalize()
+        val hookType = if (prePush) dev.repomind.core.rules.hook.HookType.PRE_PUSH else dev.repomind.core.rules.hook.HookType.PRE_COMMIT
+        val res = dev.repomind.core.rules.hook.GitHookManager.install(repoRoot, hookType, failOnViolation)
+        if (res.success) {
+            println(res.message)
+        } else {
+            System.err.println("ERROR: ${res.message}")
+            exitProcess(1)
+        }
+    }
+}
+
+@Command(name = "uninstall", description = ["Uninstall a Git architecture guard hook."])
+class HookUninstallSubcommand : Runnable {
+    @Parameters(index = "0", arity = "0..1", defaultValue = ".", description = ["Repository root directory (default: current directory)"])
+    var root: Path = Path.of(".")
+
+    @Option(names = ["--pre-push"], description = ["Uninstall pre-push hook instead of pre-commit"])
+    var prePush: Boolean = false
+
+    override fun run() {
+        val repoRoot = root.toAbsolutePath().normalize()
+        val hookType = if (prePush) dev.repomind.core.rules.hook.HookType.PRE_PUSH else dev.repomind.core.rules.hook.HookType.PRE_COMMIT
+        val ok = dev.repomind.core.rules.hook.GitHookManager.uninstall(repoRoot, hookType)
+        if (ok) {
+            println("Successfully uninstalled ${hookType.filename} hook from $repoRoot")
+        } else {
+            println("No active RepoMind ${hookType.filename} hook found to uninstall at $repoRoot")
+        }
+    }
+}
+
+@Command(name = "status", description = ["Check Git architecture guard hook installation status."])
+class HookStatusSubcommand : Runnable {
+    @Parameters(index = "0", arity = "0..1", defaultValue = ".", description = ["Repository root directory (default: current directory)"])
+    var root: Path = Path.of(".")
+
+    override fun run() {
+        val repoRoot = root.toAbsolutePath().normalize()
+        val preCommitInstalled = dev.repomind.core.rules.hook.GitHookManager.isInstalled(repoRoot, dev.repomind.core.rules.hook.HookType.PRE_COMMIT)
+        val prePushInstalled = dev.repomind.core.rules.hook.GitHookManager.isInstalled(repoRoot, dev.repomind.core.rules.hook.HookType.PRE_PUSH)
+        println("RepoMind Git Hooks Status ($repoRoot):")
+        println("  • pre-commit: ${if (preCommitInstalled) "ACTIVE ✅" else "NOT INSTALLED ❌"}")
+        println("  • pre-push:   ${if (prePushInstalled) "ACTIVE ✅" else "NOT INSTALLED ❌"}")
     }
 }
 
